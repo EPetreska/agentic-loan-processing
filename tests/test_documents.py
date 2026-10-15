@@ -1,6 +1,4 @@
-"""Tests for the document schemas: parsing, redaction and the annualized pay."""
-
-from decimal import Decimal
+"""Tests for the document schemas: parsing and redaction."""
 
 import pytest
 from pydantic import ValidationError
@@ -58,20 +56,55 @@ ID_CARD = {
 
 
 @pytest.mark.parametrize(
-    "cls, content, secrets",
+    "cls, content, hidden, secrets",
     [
-        (PayStub, PAY_STUB, ["12 Oak St", "6789", "4321"]),
-        (W2, W2_DOC, ["123-45-6789", "12 Oak St"]),
-        (TaxReturn, TAX_RETURN, ["234-56-7890", "8 Elm Rd"]),
-        (IdDocumentContent, ID_CARD, ["Maria Lopez", "1990-05-17", "D1234567", "2029-05-17"]),
+        (
+            PayStub,
+            PAY_STUB,
+            ["employee_address", "ssn_last4", "deposit_account_last4"],
+            ["12 Oak St", "6789", "4321"],
+        ),
+        (W2, W2_DOC, ["employee_ssn", "employee_address"], ["123-45-6789", "12 Oak St"]),
+        (TaxReturn, TAX_RETURN, ["ssn", "address"], ["234-56-7890", "8 Elm Rd"]),
+        (
+            IdDocumentContent,
+            ID_CARD,
+            ["full_name", "date_of_birth", "id_number", "issuing_state", "expiry_date"],
+            ["Maria Lopez", "1990-05-17", "D1234567", "2029-05-17"],
+        ),
     ],
 )
-def test_redacted_removes_identifiers(cls, content, secrets):
+def test_redacted_hides_identifiers(cls, content, hidden, secrets):
     redacted = cls.model_validate(content).redacted()
-    for field in cls.IDENTIFIER_FIELDS:
+    for field in hidden:
         assert field not in redacted
     for secret in secrets:
         assert secret not in str(redacted)
+
+
+@pytest.mark.parametrize(
+    "cls, content",
+    [(PayStub, PAY_STUB), (W2, W2_DOC), (TaxReturn, TAX_RETURN), (IdDocumentContent, ID_CARD)],
+)
+def test_redacted_shows_exactly_the_allowlist(cls, content):
+    assert set(cls.model_validate(content).redacted()) == cls.AGENT_VISIBLE_FIELDS
+
+
+@pytest.mark.parametrize("cls", [PayStub, W2, TaxReturn, IdDocumentContent])
+def test_allowlist_names_are_real_fields(cls):
+    # A typo in the allowlist would silently hide a value the agent needs.
+    real = set(cls.model_fields) | set(cls.model_computed_fields)
+    assert cls.AGENT_VISIBLE_FIELDS <= real
+
+
+def test_new_field_is_hidden_by_default():
+    # Someone adds a field later and forgets the allowlist: it must not leak.
+    class PayStubWithPhone(PayStub):
+        employee_phone: str
+
+    stub = PayStubWithPhone.model_validate(PAY_STUB | {"employee_phone": "512-555-0123"})
+    assert "employee_phone" not in stub.redacted()
+    assert "512-555-0123" not in str(stub.redacted())
 
 
 def test_redacted_pay_stub_keeps_what_the_agent_needs():
@@ -83,21 +116,6 @@ def test_redacted_pay_stub_keeps_what_the_agent_needs():
 
 def test_id_document_shows_nothing_to_the_agent():
     assert IdDocumentContent.model_validate(ID_CARD).redacted() == {}
-
-
-@pytest.mark.parametrize(
-    "frequency, gross, expected",
-    [
-        ("biweekly", "2850.00", Decimal("74100.00")),  # the Maria example
-        ("weekly", "1000", Decimal("52000")),
-        ("semimonthly", "3000", Decimal("72000")),
-        ("monthly", "5000", Decimal("60000")),
-    ],
-)
-def test_annualized_gross(frequency, gross, expected):
-    stub = PayStub.model_validate(PAY_STUB | {"pay_frequency": frequency, "gross_pay": gross})
-    assert stub.annualized_gross == expected
-    assert stub.redacted()["annualized_gross"] == str(expected)
 
 
 def test_unknown_pay_frequency_is_rejected():

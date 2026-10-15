@@ -1,8 +1,10 @@
 """The documents a customer uploads, as structured data.
 
 Each class describes what is written on one type of document: what a real
-extraction service would read off the page. Fields listed in
-IDENTIFIER_FIELDS are removed by redacted() before anything reaches the agent.
+extraction service would read off the page. Only the fields listed in
+AGENT_VISIBLE_FIELDS are passed on by redacted(); everything else, including
+the identifiers (SSN, address, account numbers), stays hidden. This is an
+allowlist: a field added later is hidden until it is listed on purpose.
 
 In this project the uploads are mocked: each upload is an UploadedDocument,
 stored as a JSON file in an eval case, with the document's content already
@@ -13,34 +15,34 @@ from datetime import date
 from decimal import Decimal
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel
 
-PayFrequency = Literal["weekly", "biweekly", "semimonthly", "monthly"]
-
-PERIODS_PER_YEAR: dict[str, int] = {
-    "weekly": 52,
-    "biweekly": 26,
-    "semimonthly": 24,
-    "monthly": 12,
-}
+from loans.income import PayFrequency
 
 
 class Document(BaseModel):
-    """Shared behavior: removing identifiers before the agent sees the content."""
+    """Shared behavior: passing on only what the agent may see."""
 
-    # Fields that identify the person. Never shown to the agent.
-    IDENTIFIER_FIELDS: ClassVar[set[str]] = set()
+    # The only fields shown to the agent. Everything else stays hidden.
+    AGENT_VISIBLE_FIELDS: ClassVar[set[str]] = set()
 
     def redacted(self) -> dict:
-        """The content without identifiers: what the agent may see."""
-        return self.model_dump(mode="json", exclude=self.IDENTIFIER_FIELDS)
+        """Only the allowed fields: what the agent may see."""
+        return self.model_dump(mode="json", include=self.AGENT_VISIBLE_FIELDS)
 
 
 class PayStub(Document):
-    IDENTIFIER_FIELDS: ClassVar[set[str]] = {
-        "employee_address",
-        "ssn_last4",
-        "deposit_account_last4",
+    # Hidden: employee_address, ssn_last4, deposit_account_last4.
+    AGENT_VISIBLE_FIELDS: ClassVar[set[str]] = {
+        "employer_name",
+        "employee_name",
+        "pay_date",
+        "pay_period_start",
+        "pay_period_end",
+        "pay_frequency",
+        "gross_pay",
+        "net_pay",
+        "ytd_gross",
     }
 
     employer_name: str
@@ -56,18 +58,16 @@ class PayStub(Document):
     ytd_gross: Decimal  # year to date
     deposit_account_last4: str | None = None
 
-    @computed_field
-    @property
-    def annualized_gross(self) -> Decimal:
-        """Gross pay for a full year at this rate.
-
-        Calculated in code, so the agent does not have to do the arithmetic.
-        """
-        return self.gross_pay * PERIODS_PER_YEAR[self.pay_frequency]
-
 
 class W2(Document):
-    IDENTIFIER_FIELDS: ClassVar[set[str]] = {"employee_ssn", "employee_address"}
+    # Hidden: employee_ssn, employee_address.
+    AGENT_VISIBLE_FIELDS: ClassVar[set[str]] = {
+        "tax_year",
+        "employer_name",
+        "employee_name",
+        "wages",
+        "federal_tax_withheld",
+    }
 
     tax_year: int
     employer_name: str
@@ -81,7 +81,14 @@ class W2(Document):
 class TaxReturn(Document):
     """A simplified Form 1040 with Schedule C, for self-employed applicants."""
 
-    IDENTIFIER_FIELDS: ClassVar[set[str]] = {"ssn", "address"}
+    # Hidden: ssn, address.
+    AGENT_VISIBLE_FIELDS: ClassVar[set[str]] = {
+        "tax_year",
+        "taxpayer_name",
+        "business_name",
+        "gross_receipts",
+        "net_profit",
+    }
 
     tax_year: int
     taxpayer_name: str
@@ -99,13 +106,8 @@ class IdDocumentContent(Document):
     only the match results from identity verification.
     """
 
-    IDENTIFIER_FIELDS: ClassVar[set[str]] = {
-        "full_name",
-        "date_of_birth",
-        "id_number",
-        "issuing_state",
-        "expiry_date",
-    }
+    # Nothing is visible.
+    AGENT_VISIBLE_FIELDS: ClassVar[set[str]] = set()
 
     full_name: str
     date_of_birth: date
