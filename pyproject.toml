@@ -1,0 +1,23 @@
+[project]
+name = "agentic-bpm-loans"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "email-validator>=2.3.0",
+    "langgraph>=1.2.15",
+    "pydantic>=2.14.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.8,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "loans"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
