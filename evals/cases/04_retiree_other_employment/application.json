@@ -1,0 +1,25 @@
+{
+  "full_name": "Linda Novak",
+  "date_of_birth": "1956-06-14",
+  "ssn": "449-15-6630",
+  "address": {
+    "street": "38 Birchwood Ln",
+    "city": "Madison",
+    "state": "WI",
+    "zip": "53704"
+  },
+  "phone": "(608) 555-0129",
+  "email": "linda.novak@example.com",
+  "id_document": {
+    "type": "passport",
+    "front": {"filename": "passport.pdf", "content_type": "application/pdf"}
+  },
+  "employment_status": "other",
+  "annual_income": "41000",
+  "income_documents": {},
+  "monthly_housing_payment": "900",
+  "loan_amount": "5000",
+  "term_months": "24",
+  "credit_check_consent": "yes",
+  "esign_consent": "yes"
+}
