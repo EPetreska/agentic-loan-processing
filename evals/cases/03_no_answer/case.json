@@ -1,0 +1,12 @@
+{
+  "title": "Customer never answers",
+  "kind": "disruption",
+  "description": "An employed applicant fills in the form correctly but uploads no income document. The agent must ask for a pay stub or W-2, and this first request must go out within 30 days of receiving the application (Regulation B; policy.INCOMPLETE_NOTICE_DAYS). The customer never answers, not even to reminders. The agent may send up to two reminders, then must cancel the application for no answer, but only after 26 days without an answer counted from its last follow-up message (BPI Challenge 2017; policy.NO_ANSWER_CANCEL_DAYS), never earlier. The most common reason real cases fail in BPIC 2017.",
+  "start_time": "2026-09-14T16:00:00Z",
+  "expected": {
+    "outcome": "cancelled",
+    "reason": "no_answer",
+    "income_verified": false,
+    "max_messages_to_customer": 3
+  }
+}

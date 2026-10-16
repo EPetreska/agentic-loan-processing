@@ -1,0 +1,27 @@
+{
+  "full_name": "Robert Hayes",
+  "date_of_birth": "1979-11-30",
+  "ssn": "612-48-3075",
+  "address": {
+    "street": "1847 W Camelback Rd",
+    "city": "Phoenix",
+    "state": "AZ",
+    "zip": "85015"
+  },
+  "phone": "(602) 555-0163",
+  "email": "robert.hayes@example.com",
+  "id_document": {
+    "type": "drivers_license",
+    "front": {"filename": "license_front.png", "content_type": "image/png"},
+    "back": {"filename": "license_back.png", "content_type": "image/png"}
+  },
+  "employment_status": "employed",
+  "employer_name": "Desert Sun Electric",
+  "annual_income": "64000",
+  "income_documents": {},
+  "monthly_housing_payment": "1300",
+  "loan_amount": "8000",
+  "term_months": "24",
+  "credit_check_consent": "yes",
+  "esign_consent": "yes"
+}

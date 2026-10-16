@@ -1,0 +1,13 @@
+{
+  "title": "Job change and raise explained by the customer",
+  "kind": "reasoning",
+  "description": "Maria changed jobs in March and got a raise last month. Her W-2 is from her old employer, her pay stub uses the new employer's legal name and predates the raise, so it supports only $74,100 of the $78,000 she claims. Her first message explains this. The agent should accept the job change and the name difference, see that the one real gap is a current pay stub at the new rate, ask for it in one targeted message, and verify the income only after the new pay stub arrives. (The check that income is not verified before the new pay stub arrives needs the audit log; the expected result below checks the final state.)",
+  "start_time": "2026-09-14T15:00:00Z",
+  "expected": {
+    "outcome": "complete",
+    "reason": "all_checks_passed",
+    "income_verified": true,
+    "must_request": ["pay_stub"],
+    "max_messages_to_customer": 1
+  }
+}

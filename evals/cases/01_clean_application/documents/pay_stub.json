@@ -1,0 +1,17 @@
+{
+  "actual_type": "pay_stub",
+  "content": {
+    "employer_name": "Lakeside Logistics Inc.",
+    "employee_name": "Daniel Kim",
+    "employee_address": "455 Maple Ave, Columbus, OH 43215",
+    "ssn_last4": "2857",
+    "pay_date": "2026-09-04",
+    "pay_period_start": "2026-08-18",
+    "pay_period_end": "2026-08-31",
+    "pay_frequency": "biweekly",
+    "gross_pay": "2769.23",
+    "net_pay": "2050.40",
+    "ytd_gross": "49846.14",
+    "deposit_account_last4": "7731"
+  }
+}

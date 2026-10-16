@@ -104,6 +104,12 @@ class IdDocumentContent(Document):
 
     Everything on an ID is an identifier, so the agent never sees any of it,
     only the match results from identity verification.
+
+    Only the front is modeled. The back of a US driver's license or state ID
+    carries a barcode (PDF417, AAMVA standard) with the same data, which real
+    identity vendors compare with the front to detect edited or fake cards.
+    This project only checks that the back was uploaded; its content is left
+    empty (content: null), because document authenticity is out of scope.
     """
 
     # Nothing is visible.

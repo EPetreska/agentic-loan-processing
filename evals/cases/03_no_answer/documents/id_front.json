@@ -1,0 +1,10 @@
+{
+  "actual_type": "drivers_license",
+  "content": {
+    "full_name": "Robert Hayes",
+    "date_of_birth": "1979-11-30",
+    "id_number": "D07294518",
+    "issuing_state": "AZ",
+    "expiry_date": "2031-11-30"
+  }
+}
