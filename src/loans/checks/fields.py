@@ -26,7 +26,6 @@ an attacker who tricks it with a prompt injection. So:
   view: the customer cannot fix them.
 """
 
-import json
 from datetime import date
 from typing import Literal
 
@@ -37,6 +36,7 @@ from loans.schemas.application import (
     RawApplication,
     SubmissionMetadata,
 )
+from loans.spotlight import quote
 
 # Fields whose value the LLM may see, so an error on them can show what the
 # customer typed. Everything else is sensitive and gets only the result.
@@ -60,11 +60,6 @@ SYSTEM_FIELDS = {
     "esign_consented_at",
 }
 
-# A typed value shown to the LLM is cut to this length, to limit how much
-# untrusted text (for example an injection attempt) reaches the prompt. Long
-# enough for real long legal names, so the agent can still compare an employer
-# name with the documents.
-MAX_ECHO_LENGTH = 200
 
 # Results are listed in the order of the form.
 FIELD_ORDER = [
@@ -164,14 +159,6 @@ def _is_missing(value) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def _echo(value) -> str:
-    """What the customer typed, quoted and cut, safe to put on one line."""
-    text = str(value)
-    if len(text) > MAX_ECHO_LENGTH:
-        text = text[:MAX_ECHO_LENGTH] + "..."
-    # json.dumps adds quotes and escapes newlines, so the value cannot
-    # pretend to be another line of the result.
-    return json.dumps(text)
 
 
 def _parse(field: str, value):
@@ -247,7 +234,7 @@ def _errors(
         top = field.split(".")[0]
         typed = _raw_value(raw, error["loc"])
         if top in LLM_VISIBLE_FIELDS and not _is_missing(typed):
-            message = f"{message} (customer entered {_echo(typed)})"
+            message = f"{message} (customer entered {quote(typed)})"
         results.append(FieldResult(field=field, status="error", message=message))
 
     return results, system_errors
@@ -282,7 +269,7 @@ def _valid_fields(
 
     if valid("full_name"):
         # Free text from the customer: quoted, like the values in errors.
-        results.append(_ok("full_name", _echo(str(raw["full_name"]).strip())))
+        results.append(_ok("full_name", quote(str(raw["full_name"]).strip())))
 
     if valid("date_of_birth"):
         born = _parse("date_of_birth", raw["date_of_birth"])
@@ -313,7 +300,7 @@ def _valid_fields(
 
     employer = raw["employer_name"]
     if valid("employer_name") and not _is_missing(employer):
-        results.append(_ok("employer_name", _echo(str(employer).strip())))
+        results.append(_ok("employer_name", quote(str(employer).strip())))
 
     if income_valid:
         results.append(_ok("annual_income", str(income)))
