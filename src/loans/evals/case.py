@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from loans.schemas.application import RawApplication, RawValue
 from loans.schemas.documents import UploadedDocument, UploadSlot
 from loans.schemas.outcome import Outcome
+from loans.store import ApplicationStore, filled_slots
 
 # What a case mainly tests (one kind per case):
 #   common      a normal, everyday application
@@ -109,18 +110,6 @@ class EvalCase(BaseModel):
     customer: CustomerScript
 
 
-def filled_slots(application: RawApplication) -> list[str]:
-    """The upload slots that have a file in the application."""
-    slots = {
-        "id_front": application.id_document.front,
-        "id_back": application.id_document.back,
-        "pay_stub": application.income_documents.pay_stub,
-        "w2": application.income_documents.w2,
-        "tax_return": application.income_documents.tax_return,
-    }
-    return [slot for slot, file in slots.items() if file is not None]
-
-
 def _read_json(path: Path) -> dict:
     with path.open() as f:
         return json.load(f)
@@ -154,3 +143,14 @@ def load_case(folder: Path) -> EvalCase:
                 raise ValueError(f"{case.case_id}: reply uploads missing documents/{name}")
 
     return case
+
+
+def submit_case(store: ApplicationStore, case: EvalCase) -> str:
+    """Submit a case's application to the store, as at intake, at the case's
+    fixed start time. The application ID is the case ID."""
+    documents = {
+        slot: case.documents[f"{slot}.json"] for slot in filled_slots(case.application)
+    }
+    return store.submit(
+        case.application, documents, case.info.start_time, application_id=case.case_id
+    )
