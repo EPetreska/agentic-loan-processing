@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from loans.checks.fields import check_fields
 from loans.evals.case import load_case, submit_case
 from loans.schemas.application import RawApplication, RawFile
 from loans.schemas.documents import UploadedDocument
 from loans.store import ApplicationStore, UnknownApplication, filled_slots
-from loans.tools.check_fields import check_fields
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 NOW = datetime(2026, 9, 14, 10, 0, tzinfo=UTC)

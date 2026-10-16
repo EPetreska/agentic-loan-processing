@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from loans.checks.fields import check_fields
 from loans.evals.case import load_case
 from loans.intake import create_metadata
-from loans.tools.check_fields import check_fields
 
 CASES_DIR = Path(__file__).parent.parent / "evals" / "cases"
 CASE_FOLDERS = sorted(p for p in CASES_DIR.iterdir() if p.is_dir())

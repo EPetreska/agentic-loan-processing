@@ -1,5 +1,9 @@
 """check_fields: check the raw application and report each field to the agent.
 
+This is plain checking logic, not an agent tool. The agent reaches it only
+through the tool check_application, which takes the application ID, loads the
+application from the store and calls check_fields.
+
 For each field the result is ok, error or warning, in the exact formats from
 the README. The checks are
 plain code: errors come from CleanApplication, warnings are added here.

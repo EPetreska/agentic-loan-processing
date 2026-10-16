@@ -10,7 +10,7 @@ import pytest
 
 from loans.intake import create_metadata
 from loans.schemas.application import RawApplication
-from loans.tools.check_fields import FieldCheckResult, check_fields
+from loans.checks.fields import FieldCheckResult, check_fields
 
 NOW = datetime(2026, 3, 1, 10, 0, tzinfo=UTC)
 TODAY = date(2026, 3, 1)
