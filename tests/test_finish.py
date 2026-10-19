@@ -1,0 +1,249 @@
+"""Tests for the finish tool."""
+
+from datetime import timedelta
+from pathlib import Path
+
+import pytest
+
+from loans.evals.case import EvalCase, load_case, submit_case
+from loans.schemas.application import RawFile
+from loans.store import ApplicationStore
+from loans.tools.finish import finish
+from loans.tools.mark_income_verified import mark_income_verified
+from loans.tools.send_message import send_message
+from loans.tools.verify_identity import verify_identity
+
+CASES = Path(__file__).parent.parent / "evals" / "cases"
+JPG = RawFile(filename="id.jpg", content_type="image/jpeg")
+PDF = RawFile(filename="doc.pdf", content_type="application/pdf")
+EXPLANATION = "All checks passed."
+
+
+def submitted(name: str = "01_clean_application") -> tuple[ApplicationStore, str, EvalCase]:
+    store = ApplicationStore()
+    case = load_case(CASES / name)
+    return store, submit_case(store, case), case
+
+
+def ready(name: str = "01_clean_application") -> tuple[ApplicationStore, str, EvalCase]:
+    """A case with identity checked and income verified, ready to complete."""
+    store, app_id, case = submitted(name)
+    today = case.info.start_time.date()
+    verify_identity(store, app_id, today)
+    mark_income_verified(store, app_id, today, "call-income", "pay_stub", "Matches the form.")
+    return store, app_id, case
+
+
+def end(store, app_id, case, outcome="complete", reason="all_checks_passed",
+        call_id="call-end", explanation=EXPLANATION, days=0):  # fmt: skip
+    now = case.info.start_time + timedelta(days=days)
+    return finish(store, app_id, now, call_id, outcome, reason, explanation)
+
+
+def message(store, app_id, case, call_id="call-msg", days=0):
+    now = case.info.start_time + timedelta(days=days)
+    send_message(store, app_id, now, call_id, "Please upload a pay stub.", "No income document.")
+
+
+def problems(text: str) -> list[str]:
+    lines = text.splitlines()
+    assert lines[0] == "not ended:"
+    return [line.removeprefix("- ") for line in lines[1:]]
+
+
+# complete
+
+
+def test_complete_when_all_checks_passed():
+    store, app_id, case = ready()
+    assert end(store, app_id, case) == "case ended: complete (all_checks_passed)"
+    ending = store.get(app_id).ending
+    assert ending.outcome == "complete"
+    assert ending.explanation == EXPLANATION
+    assert ending.ended_at == case.info.start_time
+
+
+def test_complete_refused_without_identity_and_income():
+    store, app_id, case = submitted()
+    assert problems(end(store, app_id, case)) == [
+        "the identity findings are missing or out of date",
+        "the income has not been verified",
+    ]
+    assert store.get(app_id).ending is None
+
+
+def test_complete_refused_when_identity_findings_are_not_as_required():
+    store, app_id, case = submitted()
+    doc = case.documents["id_front.json"]
+    changed = doc.model_copy(update={"content": doc.content | {"full_name": "Daniel Park"}})
+    store.upload(app_id, "id_front", changed, JPG)
+    today = case.info.start_time.date()
+    verify_identity(store, app_id, today)
+    mark_income_verified(store, app_id, today, "call-income", "pay_stub", "Matches the form.")
+    assert problems(end(store, app_id, case)) == ["identity: name_matches_form is not as required"]
+
+
+def test_complete_refused_after_a_new_id_upload():
+    store, app_id, case = ready()
+    store.upload(app_id, "id_front", case.documents["id_front.json"], JPG)
+    assert problems(end(store, app_id, case)) == [
+        "the identity findings are missing or out of date"
+    ]
+
+
+def test_complete_refused_after_an_income_correction():
+    store, app_id, case = ready()
+    store.correct_fields(app_id, {"annual_income": "72500"})
+    assert problems(end(store, app_id, case)) == [
+        # the form changed, so the identity findings are out of date too
+        "the identity findings are missing or out of date",
+        "the income verification is out of date (the document or the form changed)",
+    ]
+
+
+def test_complete_refused_when_the_form_has_errors():
+    store, app_id, case = ready()
+    store.correct_fields(app_id, {"phone": "123"})
+    verify_identity(store, app_id, case.info.start_time.date())
+    assert "the form still has errors" in problems(end(store, app_id, case))
+
+
+def test_complete_refused_for_an_applicant_under_18():
+    store, app_id, case = submitted()
+    # Born 17 years before the start, on both the form and the ID.
+    today = case.info.start_time.date()
+    born = today.replace(year=today.year - 17).isoformat()
+    store.correct_fields(app_id, {"date_of_birth": born})
+    doc = case.documents["id_front.json"]
+    changed = doc.model_copy(update={"content": doc.content | {"date_of_birth": born}})
+    store.upload(app_id, "id_front", changed, JPG)
+    verify_identity(store, app_id, today)
+    mark_income_verified(store, app_id, today, "call-income", "pay_stub", "Matches the form.")
+    assert problems(end(store, app_id, case)) == ["the applicant is under 18"]
+
+
+def test_complete_refused_without_esign_consent():
+    store, app_id, case = ready()
+    store.get(app_id).metadata.esign_consented_at = None
+    assert "the customer has not given e-sign consent" in problems(end(store, app_id, case))
+
+
+def test_maria_completes_after_the_new_pay_stub():
+    store, app_id, case = submitted("02_maria_job_change")
+    today = case.info.start_time.date()
+    verify_identity(store, app_id, today)
+    mark_income_verified(store, app_id, today, "call-1", "pay_stub", "She got a raise.")
+    assert problems(end(store, app_id, case)) == ["the income has not been verified"]
+    store.upload(app_id, "pay_stub", case.documents["pay_stub_new.json"], PDF)
+    later = today + timedelta(days=2)
+    mark_income_verified(store, app_id, later, "call-2", "pay_stub", "New stub at the new rate.")
+    assert end(store, app_id, case, days=2) == "case ended: complete (all_checks_passed)"
+
+
+# cancelled
+
+
+def test_no_answer_after_26_days():
+    store, app_id, case = submitted("03_no_answer")
+    message(store, app_id, case, days=0)
+    assert end(store, app_id, case, "cancelled", "no_answer", days=26) == (
+        "case ended: cancelled (no_answer)"
+    )
+
+
+def test_no_answer_too_early():
+    store, app_id, case = submitted("03_no_answer")
+    message(store, app_id, case, days=0)
+    text = end(store, app_id, case, "cancelled", "no_answer", days=25)
+    assert problems(text) == ["too early: 25 days since the last message (the minimum is 26 days)"]
+    assert store.get(app_id).ending is None
+
+
+def test_waiting_counts_from_the_last_message():
+    store, app_id, case = submitted("03_no_answer")
+    message(store, app_id, case, call_id="first", days=0)
+    message(store, app_id, case, call_id="follow-up", days=10)
+    text = end(store, app_id, case, "cancelled", "no_answer", days=30)
+    assert problems(text) == ["too early: 20 days since the last message (the minimum is 26 days)"]
+    assert end(store, app_id, case, "cancelled", "no_answer", days=36).startswith("case ended")
+
+
+def test_no_answer_without_any_message():
+    store, app_id, case = submitted("03_no_answer")
+    text = end(store, app_id, case, "cancelled", "no_answer", days=40)
+    assert problems(text) == ["no message has been sent to the customer"]
+
+
+def test_documents_not_provided_waits_too():
+    store, app_id, case = submitted("03_no_answer")
+    message(store, app_id, case)
+    assert end(store, app_id, case, "cancelled", "documents_not_provided", days=3).startswith(
+        "not ended"
+    )
+
+
+@pytest.mark.parametrize("reason", ["customer_withdrew", "credit_consent_refused"])
+def test_cancel_on_the_customers_word(reason):
+    store, app_id, case = submitted("03_no_answer")
+    assert end(store, app_id, case, "cancelled", reason) == f"case ended: cancelled ({reason})"
+
+
+# sent_to_human
+
+
+def test_linda_is_sent_to_a_human():
+    store, app_id, case = submitted("04_retiree_other_employment")
+    assert end(store, app_id, case, "sent_to_human", "other_employment") == (
+        "case ended: sent_to_human (other_employment)"
+    )
+
+
+def test_sending_to_a_human_is_always_allowed():
+    store, app_id, case = submitted()
+    assert end(store, app_id, case, "sent_to_human", "agent_unsure").startswith("case ended")
+
+
+# the call itself
+
+
+def test_reason_must_fit_the_outcome():
+    store, app_id, case = ready()
+    text = end(store, app_id, case, "complete", "no_answer")
+    assert text == "not ended: 'no_answer' is not a valid reason for the outcome 'complete'"
+    assert store.get(app_id).ending is None
+
+
+def test_unknown_outcome():
+    store, app_id, case = ready()
+    assert end(store, app_id, case, "approved", "all_checks_passed").startswith(
+        "not ended: 'all_checks_passed' is not a valid reason"
+    )
+
+
+def test_explanation_is_required():
+    store, app_id, case = ready()
+    assert end(store, app_id, case, explanation=" ") == "not ended: an explanation is required"
+
+
+def test_retried_call_returns_the_same_confirmation():
+    store, app_id, case = ready()
+    first = end(store, app_id, case, call_id="call-end")
+    assert end(store, app_id, case, call_id="call-end") == first
+
+
+def test_a_case_ends_only_once():
+    store, app_id, case = ready()
+    end(store, app_id, case, call_id="call-1")
+    text = end(store, app_id, case, "sent_to_human", "agent_unsure", call_id="call-2")
+    assert text == "not ended: the case has already ended (complete, all_checks_passed)"
+    assert store.get(app_id).ending.outcome == "complete"
+
+
+def test_only_the_current_case_is_ended():
+    store = ApplicationStore()
+    daniel_case = load_case(CASES / "01_clean_application")
+    daniel = submit_case(store, daniel_case)
+    maria = submit_case(store, load_case(CASES / "02_maria_job_change"))
+    end(store, daniel, daniel_case, "sent_to_human", "agent_unsure")
+    assert store.get(daniel).ending is not None
+    assert store.get(maria).ending is None

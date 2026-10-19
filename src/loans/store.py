@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from loans.intake import create_metadata
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
 from loans.schemas.documents import IncomeSlot, UploadedDocument, UploadSlot
+from loans.schemas.outcome import OutcomeKind, Reason
 from loans.services.identity import IdentityFindings
 
 # Where each upload slot sits in the form.
@@ -70,6 +71,20 @@ class IncomeVerification(BaseModel):
     verified_on: date
 
 
+class CaseEnding(BaseModel):
+    """How the agent ended the case, recorded only if the ending was allowed."""
+
+    # The ID of the tool call that ended the case, so a retried call returns
+    # the same confirmation.
+    call_id: str
+    outcome: OutcomeKind
+    reason: Reason
+    # The agent's explanation in its own words, for the next step (the
+    # credit check or the person who takes over the case).
+    explanation: str
+    ended_at: datetime
+
+
 class StoredApplication(BaseModel):
     application_id: str
     raw: RawApplication
@@ -88,6 +103,8 @@ class StoredApplication(BaseModel):
     income_verification: IncomeVerification | None = None
     # Messages sent to the customer, oldest first.
     messages: list[SentMessage] = []
+    # Set once the agent has ended the case.
+    ending: CaseEnding | None = None
 
     def identity_findings_are_current(self) -> bool:
         """True if identity findings are on file and refer to the current ID
@@ -183,6 +200,10 @@ class ApplicationStore:
     ) -> None:
         """Keep the agent's income verification on file, replacing any earlier one."""
         self.get(application_id).income_verification = verification
+
+    def record_ending(self, application_id: str, ending: CaseEnding) -> None:
+        """Keep the ending of the case on file."""
+        self.get(application_id).ending = ending
 
     def correct_fields(self, application_id: str, changes: dict) -> None:
         """The customer corrects form fields, as typed (for example
