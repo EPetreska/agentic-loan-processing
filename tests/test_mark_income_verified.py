@@ -20,8 +20,8 @@ def submitted(name: str = "01_clean_application") -> tuple[ApplicationStore, str
 
 
 def mark(store, app_id, case, slot="pay_stub", call_id="call-1", reason=REASON, days=0):
-    today = case.info.start_time.date() + timedelta(days=days)
-    return mark_income_verified(store, app_id, today, call_id, slot, reason)
+    now = case.info.start_time + timedelta(days=days)
+    return mark_income_verified(store, app_id, now, call_id, slot, reason)
 
 
 def test_verification_is_kept_on_file():
@@ -49,7 +49,7 @@ def test_refused_when_a_rule_is_not_met():
 
 def test_maria_is_verified_after_the_new_pay_stub():
     store, app_id, case = submitted("02_maria_job_change")
-    store.upload(app_id, "pay_stub", case.documents["pay_stub_new.json"], PDF)
+    store.upload(app_id, "pay_stub", case.documents["pay_stub_new.json"], PDF, now=case.info.start_time)
     assert mark(store, app_id, case, days=2) == "income verified with the pay_stub (kept on file)"
 
 
@@ -90,21 +90,21 @@ def test_a_new_call_replaces_the_earlier_verification():
 def test_out_of_date_after_a_new_upload_of_the_same_document():
     store, app_id, case = submitted()
     mark(store, app_id, case)
-    store.upload(app_id, "pay_stub", case.documents["pay_stub.json"], PDF)
+    store.upload(app_id, "pay_stub", case.documents["pay_stub.json"], PDF, now=case.info.start_time)
     assert not store.get(app_id).income_verification_is_current()
 
 
 def test_unaffected_by_uploads_of_other_documents():
     store, app_id, case = submitted()
     mark(store, app_id, case)
-    store.upload(app_id, "w2", case.documents["w2.json"], PDF)
+    store.upload(app_id, "w2", case.documents["w2.json"], PDF, now=case.info.start_time)
     assert store.get(app_id).income_verification_is_current()
 
 
 def test_out_of_date_after_an_income_correction():
     store, app_id, case = submitted()
     mark(store, app_id, case)
-    store.correct_fields(app_id, {"annual_income": "90000"})
+    store.correct_fields(app_id, {"annual_income": "90000"}, now=case.info.start_time)
     assert not store.get(app_id).income_verification_is_current()
 
 

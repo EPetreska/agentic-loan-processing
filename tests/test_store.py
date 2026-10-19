@@ -61,7 +61,7 @@ def test_documents_must_match_filled_slots(income_documents, documents):
 def test_upload_updates_document_and_form_slot():
     store = ApplicationStore()
     app_id = store.submit(RawApplication(), {}, NOW)
-    store.upload(app_id, "w2", UploadedDocument(actual_type="w2"), RawFile(**PDF))
+    store.upload(app_id, "w2", UploadedDocument(actual_type="w2"), RawFile(**PDF), now=NOW)
     stored = store.get(app_id)
     assert stored.documents["w2"].actual_type == "w2"
     assert filled_slots(stored.raw) == ["w2"]
@@ -72,7 +72,7 @@ def test_upload_replaces_an_earlier_document():
     raw = RawApplication(income_documents={"pay_stub": PDF})
     app_id = store.submit(raw, {"pay_stub": STUB}, NOW)
     new = UploadedDocument(actual_type="pay_stub", readable=False)
-    store.upload(app_id, "pay_stub", new, RawFile(filename="new.pdf", content_type="application/pdf"))
+    store.upload(app_id, "pay_stub", new, RawFile(filename="new.pdf", content_type="application/pdf"), now=NOW)
     stored = store.get(app_id)
     assert stored.documents["pay_stub"] is new
     assert stored.raw.income_documents.pay_stub.filename == "new.pdf"
@@ -81,7 +81,7 @@ def test_upload_replaces_an_earlier_document():
 def test_correct_fields():
     store = ApplicationStore()
     app_id = store.submit(RawApplication(annual_income="78k"), {}, NOW)
-    store.correct_fields(app_id, {"annual_income": "78000"})
+    store.correct_fields(app_id, {"annual_income": "78000"}, now=NOW)
     assert store.get(app_id).raw.annual_income == "78000"
 
 
@@ -89,7 +89,7 @@ def test_correct_unknown_field_is_rejected():
     store = ApplicationStore()
     app_id = store.submit(RawApplication(), {}, NOW)
     with pytest.raises(ValueError, match="anual_income"):
-        store.correct_fields(app_id, {"anual_income": "78000"})
+        store.correct_fields(app_id, {"anual_income": "78000"}, now=NOW)
 
 
 @pytest.mark.parametrize("folder", sorted(p for p in CASES.iterdir() if p.is_dir()), ids=lambda p: p.name)
@@ -109,7 +109,7 @@ def test_maria_reply_upload_makes_income_documents_current():
     reply = case.customer.replies[0]
     name = reply.uploads["pay_stub"]
     file = RawFile(filename=name, content_type="application/pdf")
-    store.upload(app_id, "pay_stub", case.documents[name], file)
+    store.upload(app_id, "pay_stub", case.documents[name], file, now=NOW)
     stub = store.get(app_id).documents["pay_stub"].parsed()
     assert str(stub.pay_date) == "2026-09-11"
 

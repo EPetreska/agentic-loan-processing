@@ -20,6 +20,10 @@ attacker, therefore cannot change which customer receives the message: the
 tool only ever works on the current application (protection against
 cross-tenant access). The time is supplied by the system because time is
 simulated in the evals, and the deadlines count from the last message.
+
+Each sent message is recorded in the audit log with the agent's reason (the
+text itself is kept with the messages); a refused message is recorded as
+blocked.
 """
 
 from datetime import datetime
@@ -45,20 +49,34 @@ def send_message(
         if message.message_id == call_id:
             return f"message sent (message {position} in this case)"
 
-    if stored.metadata.esign_consented_at is None:
-        return (
-            "not sent: the customer has not given e-sign consent, so no "
-            "electronic messages may be sent"
+    problem = _problem(stored.metadata.esign_consented_at is None, text, reason)
+    if problem:
+        store.log_event(
+            application_id, now, "guardrail", "action_blocked", f"send_message: {problem}"
         )
-    if not text.strip():
-        return "not sent: the message is empty"
-    if not reason.strip():
-        return "not sent: a reason is required"
-    if len(text) > MAX_MESSAGE_LENGTH:
-        return f"not sent: the message is longer than {MAX_MESSAGE_LENGTH} characters"
+        return f"not sent: {problem}"
 
     store.record_message(
         application_id,
         SentMessage(message_id=call_id, sent_at=now, text=text, reason=reason),
     )
-    return f"message sent (message {len(stored.messages)} in this case)"
+    position = len(stored.messages)
+    store.log_event(
+        application_id, now, "agent", "message_sent", f"message {position}", reason
+    )
+    return f"message sent (message {position} in this case)"
+
+
+def _problem(no_esign_consent: bool, text: str, reason: str) -> str | None:
+    if no_esign_consent:
+        return (
+            "the customer has not given e-sign consent, so no electronic "
+            "messages may be sent"
+        )
+    if not text.strip():
+        return "the message is empty"
+    if not reason.strip():
+        return "a reason is required"
+    if len(text) > MAX_MESSAGE_LENGTH:
+        return f"the message is longer than {MAX_MESSAGE_LENGTH} characters"
+    return None

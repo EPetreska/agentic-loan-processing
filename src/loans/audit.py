@@ -1,0 +1,70 @@
+"""The audit log: the business record of what happened in each case.
+
+One event per step, with the case ID, the exact time, who acted and a stable
+event name, so a person (an auditor, the human approver) can follow a case
+afterwards, and the log can later be exported as an event log for process
+mining. Events are only ever added, never changed or removed; for now they
+are kept in the store, later in an append-only Postgres table.
+
+This is separate from tracing (LangSmith), which records the prompts and LLM
+calls for the developer. The audit log holds no prompts and no sensitive data:
+no SSN, date of birth or contact details, and no values the customer typed.
+"""
+
+from datetime import UTC, datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
+
+from loans.spotlight import quote
+
+# Who acted. "guardrail" is the code refusing an action the agent asked for.
+Actor = Literal["system", "customer", "agent", "guardrail"]
+
+EventName = Literal[
+    # system and customer
+    "application_submitted",
+    "document_uploaded",
+    "form_corrected",
+    # agent
+    "form_checked",
+    "document_read",
+    "identity_checked",
+    "message_sent",
+    "income_verified",
+    "application_completed",
+    "application_cancelled",
+    "sent_to_human",
+    # guardrail
+    "action_blocked",
+]
+
+
+class AuditEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    application_id: str
+    at: datetime
+    actor: Actor
+    event: EventName
+    # Short facts about the step, in fixed wording.
+    details: str = ""
+    # The agent's reason, in its own words, when it gives one.
+    reason: str | None = None
+
+
+def format_audit_log(events: list[AuditEvent]) -> str:
+    """The log as a table, one line per event, for reading in the terminal.
+
+    Times are shown in UTC. The agent's reason is quoted, so a reason with
+    line breaks stays on one line, and a long reason is cut in this view (the
+    event keeps it in full).
+    """
+    lines = []
+    for event in events:
+        at = event.at.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+        line = f"{at}  {event.actor:<9}  {event.event:<21}  {event.details}"
+        if event.reason is not None:
+            line += f"  reason: {quote(event.reason)}"
+        lines.append(line.rstrip())
+    return "\n".join(lines)

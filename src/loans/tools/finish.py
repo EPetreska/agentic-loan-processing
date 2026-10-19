@@ -18,6 +18,9 @@ injected by an attacker, therefore cannot change which case is ended: the
 tool only ever works on the current application (protection against
 cross-tenant access). The time is supplied by the system because time is
 simulated in the evals, and the waiting period counts from the last message.
+
+The ending is recorded in the audit log with the reason and the agent's
+explanation; a refused ending is recorded as blocked, with every problem.
 """
 
 from datetime import datetime
@@ -27,6 +30,12 @@ from pydantic import ValidationError
 from loans.checks.ending import ending_problems
 from loans.schemas.outcome import Outcome
 from loans.store import ApplicationStore, CaseEnding
+
+EVENT_BY_OUTCOME = {
+    "complete": "application_completed",
+    "cancelled": "application_cancelled",
+    "sent_to_human": "sent_to_human",
+}
 
 
 def finish(
@@ -41,22 +50,37 @@ def finish(
     """End the current case, if the chosen ending is allowed."""
     stored = store.get(application_id)
 
+    def blocked(text: str, problems: list[str]) -> str:
+        store.log_event(
+            application_id,
+            now,
+            "guardrail",
+            "action_blocked",
+            "finish: " + "; ".join(problems),
+            explanation or None,
+        )
+        return text
+
     ending = stored.ending
     if ending is not None:
         if ending.call_id == call_id:
             return f"case ended: {ending.outcome} ({ending.reason})"
-        return f"not ended: the case has already ended ({ending.outcome}, {ending.reason})"
+        problem = f"the case has already ended ({ending.outcome}, {ending.reason})"
+        return blocked(f"not ended: {problem}", [problem])
 
     try:
         chosen = Outcome(outcome=outcome, reason=reason)
     except ValidationError:
-        return f"not ended: {reason!r} is not a valid reason for the outcome {outcome!r}"
+        problem = f"{reason!r} is not a valid reason for the outcome {outcome!r}"
+        return blocked(f"not ended: {problem}", [problem])
     if not explanation.strip():
-        return "not ended: an explanation is required"
+        problem = "an explanation is required"
+        return blocked(f"not ended: {problem}", [problem])
 
     problems = ending_problems(stored, chosen, now)
     if problems:
-        return "\n".join(["not ended:", *(f"- {problem}" for problem in problems)])
+        text = "\n".join(["not ended:", *(f"- {problem}" for problem in problems)])
+        return blocked(text, problems)
 
     store.record_ending(
         application_id,
@@ -67,5 +91,13 @@ def finish(
             explanation=explanation,
             ended_at=now,
         ),
+    )
+    store.log_event(
+        application_id,
+        now,
+        "agent",
+        EVENT_BY_OUTCOME[chosen.outcome],
+        chosen.reason,
+        explanation,
     )
     return f"case ended: {chosen.outcome} ({chosen.reason})"

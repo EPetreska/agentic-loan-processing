@@ -29,14 +29,14 @@ def submitted(name: str = "01_clean_application") -> tuple[ApplicationStore, str
 
 
 def verify(store, app_id, case) -> list[str]:
-    return verify_identity(store, app_id, case.info.start_time.date()).splitlines()
+    return verify_identity(store, app_id, case.info.start_time).splitlines()
 
 
 def upload_id(store, app_id, case, **content_changes):
     """Replace the ID front with a copy of the case's ID, with some fields changed."""
     doc = case.documents["id_front.json"]
     changed = doc.model_copy(update={"content": doc.content | content_changes})
-    store.upload(app_id, "id_front", changed, JPG)
+    store.upload(app_id, "id_front", changed, JPG, now=case.info.start_time)
 
 
 @pytest.mark.parametrize(
@@ -64,7 +64,7 @@ def test_wrong_type_of_id():
     # A passport uploaded where a driver's license was declared.
     store, app_id, case = submitted()
     doc = case.documents["id_front.json"]
-    store.upload(app_id, "id_front", doc.model_copy(update={"actual_type": "passport"}), JPG)
+    store.upload(app_id, "id_front", doc.model_copy(update={"actual_type": "passport"}), JPG, now=case.info.start_time)
     lines = verify(store, app_id, case)
     assert "document_type_matches_declared: no" in lines
     assert "name_matches_form: yes" in lines  # the passport itself can still be read
@@ -72,7 +72,7 @@ def test_wrong_type_of_id():
 
 def test_pay_stub_in_the_id_slot():
     store, app_id, case = submitted()
-    store.upload(app_id, "id_front", case.documents["pay_stub.json"], JPG)
+    store.upload(app_id, "id_front", case.documents["pay_stub.json"], JPG, now=case.info.start_time)
     lines = verify(store, app_id, case)
     assert "document_type_matches_declared: no" in lines
     assert "name_matches_form: cannot check (the document is not an ID)" in lines
@@ -81,7 +81,7 @@ def test_pay_stub_in_the_id_slot():
 def test_unreadable_id():
     store, app_id, case = submitted()
     doc = case.documents["id_front.json"]
-    store.upload(app_id, "id_front", doc.model_copy(update={"readable": False}), JPG)
+    store.upload(app_id, "id_front", doc.model_copy(update={"readable": False}), JPG, now=case.info.start_time)
     lines = verify(store, app_id, case)
     assert "readable: no" in lines
     assert "expired: cannot check (the document could not be read)" in lines
@@ -122,7 +122,7 @@ def test_date_of_birth_difference():
 
 def test_invalid_date_of_birth_on_the_form():
     store, app_id, case = submitted()
-    store.correct_fields(app_id, {"date_of_birth": "22/04/1988"})
+    store.correct_fields(app_id, {"date_of_birth": "22/04/1988"}, now=case.info.start_time)
     lines = verify(store, app_id, case)
     assert (
         "date_of_birth_matches_form: cannot check "
@@ -134,7 +134,7 @@ def test_invalid_date_of_birth_on_the_form():
 def test_no_id_uploaded():
     store, app_id, case = submitted()
     store.get(app_id).documents.pop("id_front")
-    assert verify_identity(store, app_id, case.info.start_time.date()) == (
+    assert verify_identity(store, app_id, case.info.start_time) == (
         "no ID uploaded yet (the ID front slot is empty)"
     )
 
@@ -145,7 +145,7 @@ def test_no_id_uploaded():
 )
 def test_no_id_data_in_the_result(case_name):
     store, app_id, case = submitted(case_name)
-    text = verify_identity(store, app_id, case.info.start_time.date())
+    text = verify_identity(store, app_id, case.info.start_time)
     id_content = case.documents["id_front.json"].content
     for value in id_content.values():
         assert str(value) not in text
@@ -174,14 +174,14 @@ def test_findings_out_of_date_after_a_new_id_upload():
 def test_findings_out_of_date_after_a_form_correction():
     store, app_id, case = submitted()
     verify(store, app_id, case)
-    store.correct_fields(app_id, {"full_name": "Daniel J Kim"})
+    store.correct_fields(app_id, {"full_name": "Daniel J Kim"}, now=case.info.start_time)
     assert not store.get(app_id).identity_findings_are_current()
 
 
 def test_findings_unaffected_by_other_uploads():
     store, app_id, case = submitted()
     verify(store, app_id, case)
-    store.upload(app_id, "pay_stub", case.documents["pay_stub.json"], JPG)
+    store.upload(app_id, "pay_stub", case.documents["pay_stub.json"], JPG, now=case.info.start_time)
     assert store.get(app_id).identity_findings_are_current()
 
 
@@ -202,7 +202,7 @@ def test_only_the_current_application_is_checked():
 
 def test_unsupported_upload_in_the_id_slot():
     store, app_id, case = submitted()
-    store.upload(app_id, "id_front", UploadedDocument(actual_type="other"), JPG)
+    store.upload(app_id, "id_front", UploadedDocument(actual_type="other"), JPG, now=case.info.start_time)
     lines = verify(store, app_id, case)
     assert "document_type_matches_declared: no" in lines
     assert "readable: yes" in lines

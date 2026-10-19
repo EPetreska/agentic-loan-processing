@@ -16,27 +16,30 @@ out of date after a new upload or a form correction, and finish can tell.
 Idempotent: a retried tool call (same call ID) does not record the
 verification again; it returns the same confirmation.
 
-The store, application_id, today and call_id are injected by the system and
+The store, application_id, now and call_id are injected by the system and
 are not part of the tool's parameters that the LLM sees; the LLM chooses only
 the slot and the reason. Text in a prompt, including an ID injected by an
 attacker, therefore cannot change which application is marked: the tool only
 ever works on the current application (protection against cross-tenant
-access). The date is supplied by the system because time is simulated in the
+access). The time is supplied by the system because time is simulated in the
 evals.
+
+Each verification is recorded in the audit log with the agent's reason; a
+refused one is recorded as blocked, with the rules that were not met.
 """
 
-from datetime import date
+from datetime import datetime
 from typing import get_args
 
 from loans.checks.income_verification import check_income_document
 from loans.schemas.documents import IncomeSlot
-from loans.store import ApplicationStore, IncomeVerification
+from loans.store import ApplicationStore, IncomeVerification, StoredApplication
 
 
 def mark_income_verified(
     store: ApplicationStore,
     application_id: str,
-    today: date,
+    now: datetime,
     call_id: str,
     slot: str,
     reason: str,
@@ -48,17 +51,18 @@ def mark_income_verified(
     if earlier is not None and earlier.call_id == call_id:
         return f"income verified with the {earlier.slot} (kept on file)"
 
-    if slot not in get_args(IncomeSlot):
-        return "not verified: only pay_stub, w2 and tax_return can verify income"
-    if not reason.strip():
-        return "not verified: a reason is required"
-    document = stored.documents.get(slot)
-    if document is None:
-        return f"not verified: no file uploaded in the {slot} slot"
-
-    rules = check_income_document(document, slot, stored.raw, today)
-    if not rules.met:
-        return "not verified:\n" + rules.to_llm_text()
+    problem = _problem(stored, slot, reason, now)
+    if problem:
+        store.log_event(
+            application_id,
+            now,
+            "guardrail",
+            "action_blocked",
+            "mark_income_verified: " + "; ".join(problem.splitlines()),
+            reason or None,
+        )
+        separator = "\n" if "\n" in problem else " "
+        return f"not verified:{separator}{problem}"
 
     store.record_income_verification(
         application_id,
@@ -68,7 +72,22 @@ def mark_income_verified(
             reason=reason,
             document_version=stored.document_versions[slot],
             form_version=stored.form_version,
-            verified_on=today,
+            verified_on=now.date(),
         ),
     )
+    store.log_event(application_id, now, "agent", "income_verified", slot, reason)
     return f"income verified with the {slot} (kept on file)"
+
+
+def _problem(stored: StoredApplication, slot: str, reason: str, now: datetime) -> str | None:
+    if slot not in get_args(IncomeSlot):
+        return "only pay_stub, w2 and tax_return can verify income"
+    if not reason.strip():
+        return "a reason is required"
+    document = stored.documents.get(slot)
+    if document is None:
+        return f"no file uploaded in the {slot} slot"
+    rules = check_income_document(document, slot, stored.raw, now.date())
+    if not rules.met:
+        return rules.to_llm_text()
+    return None

@@ -28,9 +28,9 @@ def submitted(name: str = "01_clean_application") -> tuple[ApplicationStore, str
 def ready(name: str = "01_clean_application") -> tuple[ApplicationStore, str, EvalCase]:
     """A case with identity checked and income verified, ready to complete."""
     store, app_id, case = submitted(name)
-    today = case.info.start_time.date()
-    verify_identity(store, app_id, today)
-    mark_income_verified(store, app_id, today, "call-income", "pay_stub", "Matches the form.")
+    now = case.info.start_time
+    verify_identity(store, app_id, now)
+    mark_income_verified(store, app_id, now, "call-income", "pay_stub", "Matches the form.")
     return store, app_id, case
 
 
@@ -76,16 +76,16 @@ def test_complete_refused_when_identity_findings_are_not_as_required():
     store, app_id, case = submitted()
     doc = case.documents["id_front.json"]
     changed = doc.model_copy(update={"content": doc.content | {"full_name": "Daniel Park"}})
-    store.upload(app_id, "id_front", changed, JPG)
-    today = case.info.start_time.date()
-    verify_identity(store, app_id, today)
-    mark_income_verified(store, app_id, today, "call-income", "pay_stub", "Matches the form.")
+    store.upload(app_id, "id_front", changed, JPG, now=case.info.start_time)
+    now = case.info.start_time
+    verify_identity(store, app_id, now)
+    mark_income_verified(store, app_id, now, "call-income", "pay_stub", "Matches the form.")
     assert problems(end(store, app_id, case)) == ["identity: name_matches_form is not as required"]
 
 
 def test_complete_refused_after_a_new_id_upload():
     store, app_id, case = ready()
-    store.upload(app_id, "id_front", case.documents["id_front.json"], JPG)
+    store.upload(app_id, "id_front", case.documents["id_front.json"], JPG, now=case.info.start_time)
     assert problems(end(store, app_id, case)) == [
         "the identity findings are missing or out of date"
     ]
@@ -93,7 +93,7 @@ def test_complete_refused_after_a_new_id_upload():
 
 def test_complete_refused_after_an_income_correction():
     store, app_id, case = ready()
-    store.correct_fields(app_id, {"annual_income": "72500"})
+    store.correct_fields(app_id, {"annual_income": "72500"}, now=case.info.start_time)
     assert problems(end(store, app_id, case)) == [
         # the form changed, so the identity findings are out of date too
         "the identity findings are missing or out of date",
@@ -103,8 +103,8 @@ def test_complete_refused_after_an_income_correction():
 
 def test_complete_refused_when_the_form_has_errors():
     store, app_id, case = ready()
-    store.correct_fields(app_id, {"phone": "123"})
-    verify_identity(store, app_id, case.info.start_time.date())
+    store.correct_fields(app_id, {"phone": "123"}, now=case.info.start_time)
+    verify_identity(store, app_id, case.info.start_time)
     assert "the form still has errors" in problems(end(store, app_id, case))
 
 
@@ -113,12 +113,12 @@ def test_complete_refused_for_an_applicant_under_18():
     # Born 17 years before the start, on both the form and the ID.
     today = case.info.start_time.date()
     born = today.replace(year=today.year - 17).isoformat()
-    store.correct_fields(app_id, {"date_of_birth": born})
+    store.correct_fields(app_id, {"date_of_birth": born}, now=case.info.start_time)
     doc = case.documents["id_front.json"]
     changed = doc.model_copy(update={"content": doc.content | {"date_of_birth": born}})
-    store.upload(app_id, "id_front", changed, JPG)
-    verify_identity(store, app_id, today)
-    mark_income_verified(store, app_id, today, "call-income", "pay_stub", "Matches the form.")
+    store.upload(app_id, "id_front", changed, JPG, now=case.info.start_time)
+    verify_identity(store, app_id, case.info.start_time)
+    mark_income_verified(store, app_id, case.info.start_time, "call-income", "pay_stub", "Matches the form.")
     assert problems(end(store, app_id, case)) == ["the applicant is under 18"]
 
 
@@ -130,12 +130,12 @@ def test_complete_refused_without_esign_consent():
 
 def test_maria_completes_after_the_new_pay_stub():
     store, app_id, case = submitted("02_maria_job_change")
-    today = case.info.start_time.date()
-    verify_identity(store, app_id, today)
-    mark_income_verified(store, app_id, today, "call-1", "pay_stub", "She got a raise.")
+    now = case.info.start_time
+    verify_identity(store, app_id, now)
+    mark_income_verified(store, app_id, now, "call-1", "pay_stub", "She got a raise.")
     assert problems(end(store, app_id, case)) == ["the income has not been verified"]
-    store.upload(app_id, "pay_stub", case.documents["pay_stub_new.json"], PDF)
-    later = today + timedelta(days=2)
+    store.upload(app_id, "pay_stub", case.documents["pay_stub_new.json"], PDF, now=case.info.start_time)
+    later = now + timedelta(days=2)
     mark_income_verified(store, app_id, later, "call-2", "pay_stub", "New stub at the new rate.")
     assert end(store, app_id, case, days=2) == "case ended: complete (all_checks_passed)"
 

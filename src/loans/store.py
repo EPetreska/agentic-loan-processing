@@ -11,6 +11,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
+from loans.audit import Actor, AuditEvent, EventName
 from loans.intake import create_metadata
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
 from loans.schemas.documents import IncomeSlot, UploadedDocument, UploadSlot
@@ -105,6 +106,8 @@ class StoredApplication(BaseModel):
     messages: list[SentMessage] = []
     # Set once the agent has ended the case.
     ending: CaseEnding | None = None
+    # Everything that happened in the case, oldest first. Only ever added to.
+    audit_log: list[AuditEvent] = []
 
     def identity_findings_are_current(self) -> bool:
         """True if identity findings are on file and refer to the current ID
@@ -157,6 +160,13 @@ class ApplicationStore:
             documents=documents,
             document_versions=dict.fromkeys(documents, 1),
         )
+        self.log_event(
+            metadata.application_id,
+            now,
+            "system",
+            "application_submitted",
+            "uploaded: " + (", ".join(sorted(documents)) or "nothing"),
+        )
         return metadata.application_id
 
     def get(self, application_id: str) -> StoredApplication:
@@ -171,6 +181,7 @@ class ApplicationStore:
         slot: UploadSlot,
         document: UploadedDocument,
         file: RawFile,
+        now: datetime,
     ) -> None:
         """The customer uploads a file into a slot, replacing any earlier one.
 
@@ -184,6 +195,7 @@ class ApplicationStore:
         stored.raw = RawApplication.model_validate(form)
         stored.documents[slot] = document
         stored.document_versions[slot] = stored.document_versions.get(slot, 0) + 1
+        self.log_event(application_id, now, "customer", "document_uploaded", slot)
 
     def record_message(self, application_id: str, message: SentMessage) -> None:
         """Keep a sent message on file."""
@@ -205,12 +217,37 @@ class ApplicationStore:
         """Keep the ending of the case on file."""
         self.get(application_id).ending = ending
 
-    def correct_fields(self, application_id: str, changes: dict) -> None:
+    def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example
-        {"annual_income": "78000"})."""
+        {"annual_income": "78000"}). Only the field names are logged, never
+        the values."""
         stored = self.get(application_id)
         unknown = set(changes) - set(RawApplication.model_fields)
         if unknown:
             raise ValueError(f"unknown form fields: {sorted(unknown)}")
         stored.raw = RawApplication.model_validate(stored.raw.model_dump() | changes)
         stored.form_version += 1
+        self.log_event(
+            application_id, now, "customer", "form_corrected", ", ".join(sorted(changes))
+        )
+
+    def log_event(
+        self,
+        application_id: str,
+        at: datetime,
+        actor: Actor,
+        event: EventName,
+        details: str = "",
+        reason: str | None = None,
+    ) -> None:
+        """Add one event to the case's audit log."""
+        self.get(application_id).audit_log.append(
+            AuditEvent(
+                application_id=application_id,
+                at=at,
+                actor=actor,
+                event=event,
+                details=details,
+                reason=reason,
+            )
+        )
