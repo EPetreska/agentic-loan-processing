@@ -39,6 +39,17 @@ class UnknownApplication(LookupError):
     """No application with this ID."""
 
 
+class SentMessage(BaseModel):
+    """A message the agent sent to the customer."""
+
+    # The ID of the tool call that sent it, so a retried call is not sent twice.
+    message_id: str
+    sent_at: datetime
+    text: str
+    # Why the agent sent it, in its own words.
+    reason: str
+
+
 class StoredApplication(BaseModel):
     application_id: str
     raw: RawApplication
@@ -53,6 +64,8 @@ class StoredApplication(BaseModel):
     form_version: int = 1
     # The identity vendor's latest findings, kept on file as a bank would.
     identity_findings: IdentityFindings | None = None
+    # Messages sent to the customer, oldest first.
+    messages: list[SentMessage] = []
 
     def identity_findings_are_current(self) -> bool:
         """True if identity findings are on file and refer to the current ID
@@ -122,6 +135,10 @@ class ApplicationStore:
         stored.raw = RawApplication.model_validate(form)
         stored.documents[slot] = document
         stored.document_versions[slot] = stored.document_versions.get(slot, 0) + 1
+
+    def record_message(self, application_id: str, message: SentMessage) -> None:
+        """Keep a sent message on file."""
+        self.get(application_id).messages.append(message)
 
     def record_identity_findings(
         self, application_id: str, findings: IdentityFindings
