@@ -7,13 +7,13 @@ application ID, looks up what it needs here, and returns a safe result
 eval cases; later it moves to Postgres without changing the tools.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
 from loans.intake import create_metadata
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
-from loans.schemas.documents import UploadedDocument, UploadSlot
+from loans.schemas.documents import IncomeSlot, UploadedDocument, UploadSlot
 from loans.services.identity import IdentityFindings
 
 # Where each upload slot sits in the form.
@@ -50,6 +50,26 @@ class SentMessage(BaseModel):
     reason: str
 
 
+class IncomeVerification(BaseModel):
+    """The agent's decision that a document verifies the claimed income,
+    recorded only after the bank's income rules passed."""
+
+    # The ID of the tool call that recorded it, so a retried call is not
+    # recorded twice.
+    call_id: str
+    slot: IncomeSlot
+    # Why the agent accepts the document, in its own words (for example why
+    # the employer on the pay stub matches the form). Shown to the human
+    # approver.
+    reason: str
+    # Which upload of the document and which version of the form were
+    # checked, and when, so finish can tell whether the verification is still
+    # current.
+    document_version: int
+    form_version: int
+    verified_on: date
+
+
 class StoredApplication(BaseModel):
     application_id: str
     raw: RawApplication
@@ -64,6 +84,8 @@ class StoredApplication(BaseModel):
     form_version: int = 1
     # The identity vendor's latest findings, kept on file as a bank would.
     identity_findings: IdentityFindings | None = None
+    # The agent's latest income verification.
+    income_verification: IncomeVerification | None = None
     # Messages sent to the customer, oldest first.
     messages: list[SentMessage] = []
 
@@ -75,6 +97,16 @@ class StoredApplication(BaseModel):
             findings is not None
             and findings.id_front_version == self.document_versions.get("id_front")
             and findings.form_version == self.form_version
+        )
+
+    def income_verification_is_current(self) -> bool:
+        """True if an income verification is on file and refers to the
+        current upload of its document and the current version of the form."""
+        verification = self.income_verification
+        return (
+            verification is not None
+            and verification.document_version == self.document_versions.get(verification.slot)
+            and verification.form_version == self.form_version
         )
 
 
@@ -145,6 +177,12 @@ class ApplicationStore:
     ) -> None:
         """Keep the identity vendor's latest findings on file."""
         self.get(application_id).identity_findings = findings
+
+    def record_income_verification(
+        self, application_id: str, verification: IncomeVerification
+    ) -> None:
+        """Keep the agent's income verification on file, replacing any earlier one."""
+        self.get(application_id).income_verification = verification
 
     def correct_fields(self, application_id: str, changes: dict) -> None:
         """The customer corrects form fields, as typed (for example

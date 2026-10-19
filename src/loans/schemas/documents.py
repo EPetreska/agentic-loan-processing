@@ -125,6 +125,9 @@ class IdDocumentContent(Document):
 # The upload slots on the form, one per document.
 UploadSlot = Literal["id_front", "id_back", "pay_stub", "w2", "tax_return"]
 
+# The slots that hold income documents.
+IncomeSlot = Literal["pay_stub", "w2", "tax_return"]
+
 # Which class describes the content of each document type.
 DOCUMENT_CLASSES: dict[str, type[Document]] = {
     "pay_stub": PayStub,

@@ -18,7 +18,9 @@ NO_ANSWER_CANCEL_DAYS = 26
 # application.
 INCOMPLETE_NOTICE_DAYS = 30
 
-# Income verification. A pay stub or a W-2 can verify the claimed income.
+# Income verification. For employed applicants a pay stub or a W-2 can verify
+# the claimed income; for self-employed applicants, a tax return. The rules
+# are applied in src/loans/checks/income_verification.py.
 
 # A pay stub counts only if its pay date is at most this many days old. A
 # common lender requirement for "current" pay stubs.
@@ -29,7 +31,11 @@ PAY_STUB_MAX_AGE_DAYS = 30
 # old and the pay stub age rule cannot apply to it.
 W2_MAX_YEARS_OLD = 1
 
-# The yearly income shown by the document (the annualized pay stub, or the
-# W-2 wages) must be within this fraction of the claimed income. Exactly 5%
-# counts as within.
+# A tax return (Form 1040 with Schedule C) counts only if it is for the most
+# recent tax year, like a W-2.
+TAX_RETURN_MAX_YEARS_OLD = 1
+
+# The yearly income shown by the document (the annualized pay stub, the W-2
+# wages, or the tax return's net profit) must be within this fraction of the
+# claimed income. Exactly 5% counts as within.
 INCOME_TOLERANCE = Decimal("0.05")

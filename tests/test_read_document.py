@@ -84,8 +84,11 @@ def test_unreadable_scan():
     blurry = UploadedDocument(actual_type="pay_stub", readable=False)
     store.upload(app_id, "pay_stub", blurry, PDF)
     lines = read(store, app_id, case, "pay_stub").splitlines()
-    assert "readable: no" in lines
-    assert len(lines) == 4  # nothing else to show
+    assert lines[3:] == [
+        "readable: no",  # no fields or calculated values to show
+        "bank income rules: not met",
+        "- the document could not be read",
+    ]
 
 
 def test_unsupported_file_type():
@@ -139,3 +142,20 @@ def test_only_the_current_application_is_read():
     text = read(store, daniel, daniel_case, "pay_stub")
     assert "Daniel Kim" in text
     assert "Maria" not in text and "Brightline" not in text
+
+
+def test_bank_rules_met():
+    store, app_id, case = submitted("01_clean_application")
+    for slot in ["pay_stub", "w2"]:
+        assert read(store, app_id, case, slot).endswith("\nbank income rules: met")
+
+
+def test_bank_rules_for_maria_before_and_after_the_new_pay_stub():
+    store, app_id, case = submitted("02_maria_job_change")
+    old = read(store, app_id, case, "pay_stub")
+    assert old.endswith(
+        "bank income rules: not met\n"
+        "- too old: the pay date was 45 days ago (the limit is 30 days)"
+    )
+    store.upload(app_id, "pay_stub", case.documents["pay_stub_new.json"], PDF)
+    assert read(store, app_id, case, "pay_stub").endswith("bank income rules: met")
