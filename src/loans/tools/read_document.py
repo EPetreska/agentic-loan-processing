@@ -21,7 +21,7 @@ by the system because time is simulated in the evals.
 from datetime import date
 from typing import Literal, get_args
 
-from loans.extraction import extract_document
+from loans.services.extraction import extract_document
 from loans.store import ApplicationStore
 
 IncomeSlot = Literal["pay_stub", "w2", "tax_return"]

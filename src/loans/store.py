@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from loans.intake import create_metadata
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
 from loans.schemas.documents import UploadedDocument, UploadSlot
+from loans.services.identity import IdentityFindings
 
 # Where each upload slot sits in the form.
 SLOT_PATHS: dict[str, tuple[str, str]] = {
@@ -44,6 +45,24 @@ class StoredApplication(BaseModel):
     metadata: SubmissionMetadata
     # The current document in each filled slot.
     documents: dict[UploadSlot, UploadedDocument]
+    # How many times each slot has been uploaded (1 at submission). Lets finish
+    # tell whether saved findings refer to the current upload.
+    document_versions: dict[UploadSlot, int] = {}
+    # How many times the form has been changed by the customer (1 at
+    # submission), for the same reason.
+    form_version: int = 1
+    # The identity vendor's latest findings, kept on file as a bank would.
+    identity_findings: IdentityFindings | None = None
+
+    def identity_findings_are_current(self) -> bool:
+        """True if identity findings are on file and refer to the current ID
+        upload and the current version of the form."""
+        findings = self.identity_findings
+        return (
+            findings is not None
+            and findings.id_front_version == self.document_versions.get("id_front")
+            and findings.form_version == self.form_version
+        )
 
 
 class ApplicationStore:
@@ -74,6 +93,7 @@ class ApplicationStore:
             raw=raw,
             metadata=metadata,
             documents=documents,
+            document_versions=dict.fromkeys(documents, 1),
         )
         return metadata.application_id
 
@@ -101,6 +121,13 @@ class ApplicationStore:
         form[group][name] = file.model_dump()
         stored.raw = RawApplication.model_validate(form)
         stored.documents[slot] = document
+        stored.document_versions[slot] = stored.document_versions.get(slot, 0) + 1
+
+    def record_identity_findings(
+        self, application_id: str, findings: IdentityFindings
+    ) -> None:
+        """Keep the identity vendor's latest findings on file."""
+        self.get(application_id).identity_findings = findings
 
     def correct_fields(self, application_id: str, changes: dict) -> None:
         """The customer corrects form fields, as typed (for example
@@ -110,3 +137,4 @@ class ApplicationStore:
         if unknown:
             raise ValueError(f"unknown form fields: {sorted(unknown)}")
         stored.raw = RawApplication.model_validate(stored.raw.model_dump() | changes)
+        stored.form_version += 1

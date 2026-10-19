@@ -22,8 +22,8 @@ Reason = Literal[
     # sent_to_human
     "other_employment",  # neither employed nor self-employed (Regulation B)
     "esign_declined",  # a paper process is needed
-    "identity_review",  # identity verification said "review"
-    "identity_failed",  # possible fraud: a person decides, not the agent
+    "identity_review",  # a name or date of birth difference on the ID that could not be resolved
+    "identity_failed",  # possible fraud: a person decides (fraud screening is not simulated in Phase 1)
     "under_18",
     "suspected_manipulation",  # for example an attack attempt was detected
     "customer_requested_human",
