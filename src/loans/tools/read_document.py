@@ -6,12 +6,12 @@ is, whether it is in the right slot, whether it could be read, its allowed
 fields with identifiers removed, and values calculated in code.
 
 ID documents cannot be read with this tool: everything on an ID is an
-identifier, and the agent only ever sees the match results from
+identifier, and the agent only ever sees the findings from
 verify_identity.
 
-When registered as an agent tool, the store, application_id and today are
-injected by the system and are not part of the tool's parameters that the LLM
-sees. Text in a prompt, including an ID injected by an attacker, therefore
+The store, application_id and today are injected by the system and are not
+part of the tool's parameters that the LLM sees; the LLM only chooses the
+slot. Text in a prompt, including an ID injected by an attacker, therefore
 cannot change which application is read: the tool only ever works on the
 current application (protection against cross-tenant access). The LLM is not
 given the application ID at all; it has no use for it. The date is supplied

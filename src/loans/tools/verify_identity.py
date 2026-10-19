@@ -3,18 +3,20 @@
 The mock identity vendor compares the uploaded ID with the form and reports
 only its findings (document type, readable, expired, name and date of birth
 match). There is no verdict: the agent combines the findings with the bank's
-requirements, which are part of its instructions, and decides what to do.
-The findings are kept on file in the store, as a bank would keep a vendor's
-answer, so finish can later check them without redoing the comparison.
+requirements, which are part of the frame (in the sense of the Agentic BPM
+manifesto: the rules the agent works within, stated in its instructions and
+enforced in code by finish), and decides what to do. The findings are kept on
+file in the store, as a bank would keep a vendor's answer, so finish can later
+check them without redoing the comparison.
 
 The agent never sees the ID itself: no name, date of birth or ID number is
-returned. When registered as an agent tool, the store, application_id and
-today are injected by the system and are not part of the tool's parameters
-that the LLM sees. Text in a prompt, including an ID injected by an attacker,
-therefore cannot change which application is checked: the tool only ever
-works on the current application (protection against cross-tenant access).
-The LLM is not given the application ID at all; it has no use for it. The
-date is supplied by the system because time is simulated in the evals.
+returned. The store, application_id and today are injected by the system and
+are not part of the tool's parameters that the LLM sees; the tool has no
+parameters the LLM chooses. Text in a prompt, including an ID injected by an
+attacker, therefore cannot change which application is checked: the tool only
+ever works on the current application (protection against cross-tenant
+access). The LLM is not given the application ID at all; it has no use for it.
+The date is supplied by the system because time is simulated in the evals.
 """
 
 from datetime import date
