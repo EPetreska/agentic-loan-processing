@@ -14,7 +14,7 @@ from loans.schemas.application import RawApplication, SubmissionMetadata
 _BOOL = TypeAdapter(bool)
 
 
-def _is_yes(value) -> bool:
+def is_yes(value) -> bool:
     """True only if a checkbox value clearly means yes ("yes", "true", True, ...)."""
     if value is None:
         return False
@@ -43,6 +43,6 @@ def create_metadata(
     return SubmissionMetadata(
         application_id=application_id or str(uuid4()),
         submitted_at=now,
-        credit_check_consented_at=now if _is_yes(raw.credit_check_consent) else None,
-        esign_consented_at=now if _is_yes(raw.esign_consent) else None,
+        credit_check_consented_at=now if is_yes(raw.credit_check_consent) else None,
+        esign_consented_at=now if is_yes(raw.esign_consent) else None,
     )

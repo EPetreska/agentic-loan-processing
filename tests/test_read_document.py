@@ -28,7 +28,13 @@ def test_pay_stub_with_calculated_values():
     store, app_id, case = submitted("01_clean_application")
     text = read(store, app_id, case, "pay_stub")
     lines = text.splitlines()
-    assert lines[:4] == ["slot: pay_stub", "document_type: pay_stub", "matches_slot: yes", "readable: yes"]
+    assert lines[:5] == [
+        "extraction findings:",
+        "slot: pay_stub",
+        "document_type: pay_stub",
+        "matches_slot: yes",
+        "readable: yes",
+    ]
     assert 'employer_name: "Lakeside Logistics Inc."' in lines
     assert "gross_pay: 2769.23" in lines
     assert "pay_frequency: biweekly" in lines
@@ -84,7 +90,7 @@ def test_unreadable_scan():
     blurry = UploadedDocument(actual_type="pay_stub", readable=False)
     store.upload(app_id, "pay_stub", blurry, PDF, now=case.info.start_time)
     lines = read(store, app_id, case, "pay_stub").splitlines()
-    assert lines[3:] == [
+    assert lines[4:] == [
         "readable: no",  # no fields or calculated values to show
         "bank income rules: not met",
         "- the document could not be read",

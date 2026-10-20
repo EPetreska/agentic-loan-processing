@@ -14,6 +14,9 @@ recorded in the audit log (the counts of errors and warnings, not the values).
 
 The raw application never leaves the tool; errors on system fields are left
 out of the text (see check_fields).
+
+Once the case has ended, the tool refuses and the attempt is logged as
+blocked.
 """
 
 from datetime import datetime
@@ -24,6 +27,8 @@ from loans.store import ApplicationStore
 
 def check_application(store: ApplicationStore, application_id: str, now: datetime) -> str:
     """Check the current application and return the result as text for the agent."""
+    if refusal := store.refuse_if_ended(application_id, now, "check_application"):
+        return refusal
     stored = store.get(application_id)
     text = check_fields(stored.raw, stored.metadata, now.date()).to_llm_text()
     summary = text.splitlines()[0]  # for example "complete: no (1 error, 0 warnings)"

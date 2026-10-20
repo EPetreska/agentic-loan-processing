@@ -17,3 +17,6 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# Audit logs written by runs
+audit_logs/

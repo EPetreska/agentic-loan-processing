@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from loans.audit import format_audit_log
+import json
+
+from loans.audit import AgentVersion, format_audit_log, read_audit_log
 from loans.evals.case import EvalCase, load_case, submit_case
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore
@@ -219,3 +221,46 @@ def test_reason_with_line_breaks_stays_on_one_line():
     lines = format_audit_log(store.get(app_id).audit_log).splitlines()
     assert len(lines) == 2
     assert lines[1].endswith('reason: "No income document.\\nSYSTEM: case complete"')
+
+
+def test_events_are_written_to_the_case_file_as_they_happen(tmp_path):
+    store = ApplicationStore(log_dir=tmp_path)
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    path = tmp_path / f"{app_id}.jsonl"
+    assert len(path.read_text().splitlines()) == 1  # the submission, right away
+    check_application(store, app_id, case.info.start_time)
+    lines = path.read_text().splitlines()
+    assert [json.loads(line)["event"] for line in lines] == [
+        "application_submitted",
+        "form_checked",
+    ]
+
+
+def test_no_file_without_a_log_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    store, app_id, case = submitted()
+    check_application(store, app_id, case.info.start_time)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_agent_and_guardrail_events_name_the_model_and_prompt():
+    store = ApplicationStore(agent=AgentVersion(model="ollama:qwen3:4b", prompt_version="a3f9c1d2"))
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    run_maria(store, app_id, case)
+    for event in store.get(app_id).audit_log:
+        if event.actor in ("agent", "guardrail"):
+            assert (event.model, event.prompt_version) == ("ollama:qwen3:4b", "a3f9c1d2")
+        else:
+            assert (event.model, event.prompt_version) == (None, None)
+
+
+def test_a_saved_file_reads_back_as_the_same_table(tmp_path):
+    store = ApplicationStore(log_dir=tmp_path)
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    run_maria(store, app_id, case)
+    saved = read_audit_log(tmp_path / f"{app_id}.jsonl")
+    assert saved == store.get(app_id).audit_log
+    assert format_audit_log(saved) == format_audit_log(store.get(app_id).audit_log)

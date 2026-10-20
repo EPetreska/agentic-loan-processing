@@ -1,0 +1,118 @@
+"""Tests for the agent loop, with a fake LLM that plays back fixed answers.
+
+No real model is called: these tests check the wiring (tools are called, the
+loop stops at the right time), not the agent's judgment. The judgment is
+tested by the evals, with a real model.
+"""
+
+from pathlib import Path
+
+import pytest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, HumanMessage
+
+from loans.agent.graph import build_graph, make_model
+from loans.agent.prompt import first_turn
+from loans.agent.tools import make_tools
+from loans.evals.case import load_case, submit_case
+from loans.store import ApplicationStore
+
+CASES = Path(__file__).parent.parent / "evals" / "cases"
+
+
+class FakeModel(GenericFakeChatModel):
+    """Plays back a fixed list of answers; accepts tools like a real model."""
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+
+def step(name, args=None, call_id=None):
+    """An LLM answer that calls one tool."""
+    return AIMessage(
+        content="",
+        tool_calls=[{"name": name, "args": args or {}, "id": call_id or f"call-{name}"}],
+    )
+
+
+def run(answers, case_name="01_clean_application"):
+    store = ApplicationStore()
+    case = load_case(CASES / case_name)
+    app_id = submit_case(store, case)
+    model = FakeModel(messages=iter(answers))
+    tools = make_tools(store, app_id, lambda: case.info.start_time)
+    graph = build_graph(model, tools, store, app_id)
+    result = graph.invoke({"messages": [HumanMessage(first_turn(None))]})
+    return store, app_id, result
+
+
+DANIEL = [
+    step("check_application"),
+    step("read_document", {"slot": "pay_stub"}),
+    step("verify_identity"),
+    step("mark_income_verified", {"slot": "pay_stub", "reason": "Same employer, amounts match."}),
+    step(
+        "finish",
+        {"outcome": "complete", "reason": "all_checks_passed", "explanation": "All checks passed."},
+    ),
+]
+
+
+def test_daniel_is_completed_through_the_loop():
+    store, app_id, _ = run(DANIEL)
+    assert store.get(app_id).ending.outcome == "complete"
+    events = [e.event for e in store.get(app_id).audit_log]
+    assert events == [
+        "application_submitted",
+        "form_checked",
+        "document_read",
+        "identity_checked",
+        "income_verified",
+        "application_completed",
+    ]
+
+
+def test_the_loop_stops_after_finish():
+    # An extra answer after finish is never asked for.
+    store, app_id, result = run([*DANIEL, step("send_message", {"text": "Hi", "reason": "x"})])
+    assert store.get(app_id).messages == []
+    assert result["messages"][-1].type == "tool"  # finish's result is the last message
+
+
+def test_a_refused_finish_goes_back_to_the_llm():
+    early = {"outcome": "complete", "reason": "all_checks_passed", "explanation": "Too early."}
+    answers = [step("finish", early, "f1"), *DANIEL]
+    store, app_id, result = run(answers)
+    first_result = result["messages"][2]
+    assert first_result.content.startswith("not ended:")
+    assert store.get(app_id).ending.outcome == "complete"
+
+
+def test_the_loop_stops_when_the_llm_answers_without_a_tool():
+    answers = [
+        step("send_message", {"text": "Please upload a pay stub.", "reason": "Missing."}),
+        AIMessage(content="Waiting for the customer's pay stub."),
+    ]
+    store, app_id, result = run(answers, "03_no_answer")
+    assert store.get(app_id).ending is None
+    assert len(store.get(app_id).messages) == 1
+    assert result["messages"][-1].content == "Waiting for the customer's pay stub."
+
+
+def test_a_wrong_tool_argument_is_returned_to_the_llm():
+    answers = [step("read_document", {"slot": "id_front"}), *DANIEL]
+    store, app_id, result = run(answers)
+    error = result["messages"][2]
+    assert error.type == "tool" and error.status == "error"
+    assert store.get(app_id).ending.outcome == "complete"
+
+
+def test_make_model_reads_the_setting():
+    model = make_model("ollama:qwen3:4b")
+    assert model.model == "qwen3:4b"
+    assert model.num_ctx == 16_384  # not Ollama's small default
+
+
+def test_make_model_rejects_an_unknown_setting():
+    with pytest.raises(ValueError):
+        make_model("qwen3")

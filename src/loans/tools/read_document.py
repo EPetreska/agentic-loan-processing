@@ -5,8 +5,10 @@ gets back what the mock extraction service found: what the document really
 is, whether it is in the right slot, whether it could be read, its allowed
 fields with identifiers removed, and values calculated in code.
 
-Below the findings it adds the results of the bank's income rules (current
-document, within 5% of the claimed income), from the same code that
+The result has two labeled parts, so it is clear who says what: the
+"extraction findings" from the vendor, and below them the results of the
+bank's income rules (current document, within 5% of the claimed income),
+from the same code that
 mark_income_verified uses to refuse. The agent never compares numbers itself:
 it reads "not met: too old" and decides what to do next. The rules are the
 bank's, not the vendor's, so they are added here, not in the extraction
@@ -25,6 +27,9 @@ given the application ID at all; it has no use for it. The time is supplied
 by the system because time is simulated in the evals. Each read is recorded
 in the audit log (the slot and whether the rules were met); an attempt to read
 an ID is recorded as blocked.
+
+Once the case has ended, the tool refuses and the attempt is logged as
+blocked.
 """
 
 from datetime import datetime
@@ -41,6 +46,8 @@ def read_document(
 ) -> str:
     """Read the document in one income document slot and return the result as
     text for the agent."""
+    if refusal := store.refuse_if_ended(application_id, now, "read_document"):
+        return refusal
     if slot not in get_args(IncomeSlot):
         tried = slot if slot in get_args(UploadSlot) else "an unknown slot"
         store.log_event(
@@ -62,4 +69,4 @@ def read_document(
     store.log_event(
         application_id, now, "agent", "document_read", f"{slot}: bank income rules {met}"
     )
-    return f"{findings}\n{rules.to_llm_text()}"
+    return f"extraction findings:\n{findings}\n{rules.to_llm_text()}"

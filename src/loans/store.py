@@ -5,18 +5,30 @@ The agent never reads the store. Its tools do: each tool receives only the
 application ID, looks up what it needs here, and returns a safe result
 (reference passing). For now the store lives in memory and is filled from the
 eval cases; later it moves to Postgres without changing the tools.
+
+If the store is given a log folder, every audit event is also written to the
+case's log file (one JSON line per event) the moment it happens, so a person
+can review the log at any time and a crash loses nothing. The tests use no
+folder, so nothing is written to disk.
 """
 
 from datetime import date, datetime
+from pathlib import Path
 
 from pydantic import BaseModel
 
-from loans.audit import Actor, AuditEvent, EventName
-from loans.intake import create_metadata
+from loans.audit import Actor, AgentVersion, AuditEvent, EventName
+from loans.intake import create_metadata, is_yes
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
 from loans.schemas.documents import IncomeSlot, UploadedDocument, UploadSlot
 from loans.schemas.outcome import OutcomeKind, Reason
 from loans.services.identity import IdentityFindings
+
+# Each consent on the form, and the metadata field holding when it was given.
+CONSENT_TIMES: dict[str, str] = {
+    "credit_check_consent": "credit_check_consented_at",
+    "esign_consent": "esign_consented_at",
+}
 
 # Where each upload slot sits in the form.
 SLOT_PATHS: dict[str, tuple[str, str]] = {
@@ -131,8 +143,13 @@ class StoredApplication(BaseModel):
 
 
 class ApplicationStore:
-    def __init__(self) -> None:
+    def __init__(
+        self, log_dir: Path | None = None, agent: AgentVersion | None = None
+    ) -> None:
         self._applications: dict[str, StoredApplication] = {}
+        self._log_dir = log_dir
+        # Added to agent and guardrail events.
+        self._agent = agent
 
     def submit(
         self,
@@ -220,13 +237,26 @@ class ApplicationStore:
     def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example
         {"annual_income": "78000"}). Only the field names are logged, never
-        the values."""
+        the values.
+
+        A consent given in a correction is timestamped with the time of the
+        correction, as intake does at submission; a consent taken back loses
+        its timestamp. A consent that was already given keeps its first time.
+        """
         stored = self.get(application_id)
         unknown = set(changes) - set(RawApplication.model_fields)
         if unknown:
             raise ValueError(f"unknown form fields: {sorted(unknown)}")
         stored.raw = RawApplication.model_validate(stored.raw.model_dump() | changes)
         stored.form_version += 1
+        metadata = stored.metadata
+        for field, time_field in CONSENT_TIMES.items():
+            if field not in changes:
+                continue
+            if not is_yes(changes[field]):
+                setattr(metadata, time_field, None)
+            elif getattr(metadata, time_field) is None:
+                setattr(metadata, time_field, now)
         self.log_event(
             application_id, now, "customer", "form_corrected", ", ".join(sorted(changes))
         )
@@ -240,14 +270,32 @@ class ApplicationStore:
         details: str = "",
         reason: str | None = None,
     ) -> None:
-        """Add one event to the case's audit log."""
-        self.get(application_id).audit_log.append(
-            AuditEvent(
-                application_id=application_id,
-                at=at,
-                actor=actor,
-                event=event,
-                details=details,
-                reason=reason,
-            )
+        """Add one event to the case's audit log, and to its log file if the
+        store has a log folder."""
+        agent = self._agent if actor in ("agent", "guardrail") else None
+        audit_event = AuditEvent(
+            application_id=application_id,
+            at=at,
+            actor=actor,
+            event=event,
+            details=details,
+            reason=reason,
+            model=agent.model if agent else None,
+            prompt_version=agent.prompt_version if agent else None,
         )
+        self.get(application_id).audit_log.append(audit_event)
+        if self._log_dir is not None:
+            self._log_dir.mkdir(parents=True, exist_ok=True)
+            with (self._log_dir / f"{application_id}.jsonl").open("a") as f:
+                f.write(audit_event.model_dump_json() + "\n")
+
+    def refuse_if_ended(self, application_id: str, now: datetime, tool: str) -> str | None:
+        """For tools: once the case has ended, every action is refused and
+        logged as blocked. Returns the refusal, or None if the case is open."""
+        ending = self.get(application_id).ending
+        if ending is None:
+            return None
+        self.log_event(
+            application_id, now, "guardrail", "action_blocked", f"{tool}: the case has already ended"
+        )
+        return f"not done: the case has already ended ({ending.outcome}, {ending.reason})"

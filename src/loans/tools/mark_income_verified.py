@@ -26,6 +26,9 @@ evals.
 
 Each verification is recorded in the audit log with the agent's reason; a
 refused one is recorded as blocked, with the rules that were not met.
+
+Once the case has ended, the tool refuses and the attempt is logged as
+blocked.
 """
 
 from datetime import datetime
@@ -50,6 +53,8 @@ def mark_income_verified(
     earlier = stored.income_verification
     if earlier is not None and earlier.call_id == call_id:
         return f"income verified with the {earlier.slot} (kept on file)"
+    if refusal := store.refuse_if_ended(application_id, now, "mark_income_verified"):
+        return refusal
 
     problem = _problem(stored, slot, reason, now)
     if problem:

@@ -24,6 +24,9 @@ simulated in the evals, and the deadlines count from the last message.
 Each sent message is recorded in the audit log with the agent's reason (the
 text itself is kept with the messages); a refused message is recorded as
 blocked.
+
+Once the case has ended, the tool refuses and the attempt is logged as
+blocked.
 """
 
 from datetime import datetime
@@ -48,6 +51,8 @@ def send_message(
     for position, message in enumerate(stored.messages, start=1):
         if message.message_id == call_id:
             return f"message sent (message {position} in this case)"
+    if refusal := store.refuse_if_ended(application_id, now, "send_message"):
+        return refusal
 
     problem = _problem(stored.metadata.esign_consented_at is None, text, reason)
     if problem:

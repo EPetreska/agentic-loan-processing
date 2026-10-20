@@ -1,6 +1,6 @@
 """Tests for the application store."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -128,3 +128,56 @@ def test_store_feeds_check_fields():
     stored = store.get(submit_case(store, case))
     result = check_fields(stored.raw, stored.metadata, today=case.info.start_time.date())
     assert result.complete
+
+
+def daniel_without(consent: str):
+    """Daniel's case, submitted with one consent answered "no"."""
+    store = ApplicationStore()
+    case = load_case(CASES / "01_clean_application")
+    raw = case.application.model_copy(update={consent: "no"})
+    documents = {slot: case.documents[f"{slot}.json"] for slot in filled_slots(raw)}
+    app_id = store.submit(raw, documents, case.info.start_time, application_id=case.case_id)
+    return store, app_id, case
+
+
+def test_credit_consent_given_later_is_timestamped():
+    store, app_id, case = daniel_without("credit_check_consent")
+    start = case.info.start_time
+    assert store.get(app_id).metadata.credit_check_consented_at is None
+    later = start + timedelta(days=2)
+    store.correct_fields(app_id, {"credit_check_consent": "yes"}, now=later)
+    stored = store.get(app_id)
+    assert stored.metadata.credit_check_consented_at == later
+    assert check_fields(stored.raw, stored.metadata, today=later.date()).complete
+
+
+def test_esign_consent_given_later_is_timestamped():
+    store, app_id, case = daniel_without("esign_consent")
+    later = case.info.start_time + timedelta(days=1)
+    store.correct_fields(app_id, {"esign_consent": "yes"}, now=later)
+    assert store.get(app_id).metadata.esign_consented_at == later
+
+
+def test_consent_given_again_keeps_its_first_time():
+    store = ApplicationStore()
+    case = load_case(CASES / "01_clean_application")
+    app_id = submit_case(store, case)
+    later = case.info.start_time + timedelta(days=3)
+    store.correct_fields(app_id, {"credit_check_consent": "yes"}, now=later)
+    assert store.get(app_id).metadata.credit_check_consented_at == case.info.start_time
+
+
+def test_consent_taken_back_loses_its_time():
+    store = ApplicationStore()
+    case = load_case(CASES / "01_clean_application")
+    app_id = submit_case(store, case)
+    store.correct_fields(app_id, {"credit_check_consent": "no"}, now=case.info.start_time)
+    stored = store.get(app_id)
+    assert stored.metadata.credit_check_consented_at is None
+    assert not check_fields(stored.raw, stored.metadata, today=case.info.start_time.date()).complete
+
+
+def test_other_corrections_leave_the_consent_times_alone():
+    store, app_id, case = daniel_without("credit_check_consent")
+    store.correct_fields(app_id, {"annual_income": "72000"}, now=case.info.start_time)
+    assert store.get(app_id).metadata.credit_check_consented_at is None

@@ -18,6 +18,9 @@ ever works on the current application (protection against cross-tenant
 access). The LLM is not given the application ID at all; it has no use for it.
 The time is supplied by the system because time is simulated in the evals.
 Each check is recorded in the audit log with the findings (yes or no only).
+
+Once the case has ended, the tool refuses and the attempt is logged as
+blocked.
 """
 
 from datetime import datetime
@@ -28,6 +31,8 @@ from loans.store import ApplicationStore
 
 def verify_identity(store: ApplicationStore, application_id: str, now: datetime) -> str:
     """Check the current application's ID and return the findings as text."""
+    if refusal := store.refuse_if_ended(application_id, now, "verify_identity"):
+        return refusal
     stored = store.get(application_id)
     document = stored.documents.get("id_front")
     if document is None:

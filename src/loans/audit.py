@@ -9,9 +9,15 @@ are kept in the store, later in an append-only Postgres table.
 This is separate from tracing (LangSmith), which records the prompts and LLM
 calls for the developer. The audit log holds no prompts and no sensitive data:
 no SSN, date of birth or contact details, and no values the customer typed.
+
+To read a saved log file as a table:
+
+    uv run python -m loans.audit audit_logs/<run time>/<case>.jsonl
 """
 
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -51,6 +57,18 @@ class AuditEvent(BaseModel):
     details: str = ""
     # The agent's reason, in its own words, when it gives one.
     reason: str | None = None
+    # For agent and guardrail events: which model and which version of the
+    # agent's instructions were running, so a change in behavior can be traced
+    # to a model or prompt change.
+    model: str | None = None
+    prompt_version: str | None = None
+
+
+class AgentVersion(BaseModel):
+    """The model and prompt version of the running agent."""
+
+    model: str
+    prompt_version: str
 
 
 def format_audit_log(events: list[AuditEvent]) -> str:
@@ -68,3 +86,15 @@ def format_audit_log(events: list[AuditEvent]) -> str:
             line += f"  reason: {quote(event.reason)}"
         lines.append(line.rstrip())
     return "\n".join(lines)
+
+
+def read_audit_log(path: Path) -> list[AuditEvent]:
+    """The events in a saved log file, oldest first."""
+    with Path(path).open() as f:
+        return [AuditEvent.model_validate_json(line) for line in f if line.strip()]
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit("usage: python -m loans.audit <log file>")
+    print(format_audit_log(read_audit_log(Path(sys.argv[1]))))
