@@ -13,7 +13,9 @@ fix them or choose another ending. Used by the finish tool.
   recorded findings and verification are checked; they are not redone.
 - cancelled because the customer did not answer or did not send the
   documents (no_answer, documents_not_provided): only after at least 26 days
-  since the agent's last message, never earlier (policy.py).
+  since the last contact, never earlier (policy.py). The last contact is the
+  agent's last message or the customer's last reply, whichever is later, so a
+  customer who answered gets the full 26 days again.
 - cancelled because the customer withdrew or refused the credit check: the
   agent's judgment from the customer's messages, stated in its explanation.
 - sent_to_human: always allowed. Handing a case to a person is the safe
@@ -83,13 +85,20 @@ def _complete_problems(stored: StoredApplication, today: date) -> list[str]:
     return problems
 
 
+def last_contact(stored: StoredApplication) -> datetime | None:
+    """The time of the agent's last message or the customer's last reply,
+    whichever is later; None if neither happened."""
+    times = [m.sent_at for m in stored.messages] + [r.received_at for r in stored.replies]
+    return max(times, default=None)
+
+
 def _waiting_problems(stored: StoredApplication, now: datetime) -> list[str]:
     if not stored.messages:
         return ["no message has been sent to the customer"]
-    waited = now - stored.messages[-1].sent_at
+    waited = now - last_contact(stored)
     if waited < timedelta(days=policy.NO_ANSWER_CANCEL_DAYS):
         return [
-            f"too early: {waited.days} days since the last message "
+            f"too early: {waited.days} days since the last message or reply "
             f"(the minimum is {policy.NO_ANSWER_CANCEL_DAYS} days)"
         ]
     return []

@@ -7,7 +7,8 @@ import pytest
 
 from loans.evals.case import EvalCase, load_case, submit_case
 from loans.schemas.application import RawFile
-from loans.store import ApplicationStore
+from loans.checks.ending import last_contact
+from loans.store import ApplicationStore, CustomerReply
 from loans.tools.finish import finish
 from loans.tools.mark_income_verified import mark_income_verified
 from loans.tools.send_message import send_message
@@ -155,7 +156,7 @@ def test_no_answer_too_early():
     store, app_id, case = submitted("03_no_answer")
     message(store, app_id, case, days=0)
     text = end(store, app_id, case, "cancelled", "no_answer", days=25)
-    assert problems(text) == ["too early: 25 days since the last message (the minimum is 26 days)"]
+    assert problems(text) == ["too early: 25 days since the last message or reply (the minimum is 26 days)"]
     assert store.get(app_id).ending is None
 
 
@@ -164,7 +165,7 @@ def test_waiting_counts_from_the_last_message():
     message(store, app_id, case, call_id="first", days=0)
     message(store, app_id, case, call_id="follow-up", days=10)
     text = end(store, app_id, case, "cancelled", "no_answer", days=30)
-    assert problems(text) == ["too early: 20 days since the last message (the minimum is 26 days)"]
+    assert problems(text) == ["too early: 20 days since the last message or reply (the minimum is 26 days)"]
     assert end(store, app_id, case, "cancelled", "no_answer", days=36).startswith("case ended")
 
 
@@ -247,3 +248,36 @@ def test_only_the_current_case_is_ended():
     end(store, daniel, daniel_case, "sent_to_human", "agent_unsure")
     assert store.get(daniel).ending is not None
     assert store.get(maria).ending is None
+
+
+def test_a_reply_restarts_the_26_days():
+    store, app_id, case = submitted("03_no_answer")
+    message(store, app_id, case, days=0)
+    replied = case.info.start_time + timedelta(days=10)
+    store.record_reply(app_id, CustomerReply(received_at=replied, message="I'll send it soon."))
+    # 30 days after the message, but only 20 after the reply: too early.
+    text = end(store, app_id, case, "cancelled", "documents_not_provided", days=30)
+    assert problems(text) == [
+        "too early: 20 days since the last message or reply (the minimum is 26 days)"
+    ]
+    assert end(store, app_id, case, "cancelled", "documents_not_provided", days=36) == (
+        "case ended: cancelled (documents_not_provided)"
+    )
+
+
+def test_an_old_reply_does_not_extend_the_wait():
+    # The customer replied, then the agent wrote again: count from the message.
+    store, app_id, case = submitted("03_no_answer")
+    store.record_reply(app_id, CustomerReply(received_at=case.info.start_time, message="Hi"))
+    message(store, app_id, case, days=5)
+    assert end(store, app_id, case, "cancelled", "no_answer", days=31).startswith("case ended")
+
+
+def test_last_contact():
+    store, app_id, case = submitted("03_no_answer")
+    stored = store.get(app_id)
+    assert last_contact(stored) is None
+    message(store, app_id, case, days=1)
+    replied = case.info.start_time + timedelta(days=3)
+    store.record_reply(app_id, CustomerReply(received_at=replied))
+    assert last_contact(stored) == replied

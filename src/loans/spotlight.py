@@ -15,12 +15,17 @@ import json
 # the documents.
 MAX_QUOTED_LENGTH = 200
 
+# Customer messages are longer (a few sentences explaining a job change, for
+# example), so they get a larger limit: the same as for the agent's own
+# messages to the customer.
+MAX_QUOTED_MESSAGE_LENGTH = 2000
 
-def quote(value) -> str:
+
+def quote(value, max_length: int = MAX_QUOTED_LENGTH) -> str:
     """The value quoted, cut and on one line, safe to show to the LLM."""
     text = str(value)
-    if len(text) > MAX_QUOTED_LENGTH:
-        text = text[:MAX_QUOTED_LENGTH] + "..."
+    if len(text) > max_length:
+        text = text[:max_length] + "..."
     # json.dumps adds quotes and escapes newlines, so the value cannot
     # pretend to be another line of the result.
     return json.dumps(text)

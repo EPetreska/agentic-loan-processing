@@ -9,7 +9,7 @@ from loans.checks.fields import check_fields
 from loans.evals.case import load_case, submit_case
 from loans.schemas.application import RawApplication, RawFile
 from loans.schemas.documents import UploadedDocument
-from loans.store import ApplicationStore, UnknownApplication, filled_slots
+from loans.store import ApplicationStore, CustomerReply, UnknownApplication, filled_slots
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 NOW = datetime(2026, 9, 14, 10, 0, tzinfo=UTC)
@@ -181,3 +181,31 @@ def test_other_corrections_leave_the_consent_times_alone():
     store, app_id, case = daniel_without("credit_check_consent")
     store.correct_fields(app_id, {"annual_income": "72000"}, now=case.info.start_time)
     assert store.get(app_id).metadata.credit_check_consented_at is None
+
+
+def test_a_reply_is_kept_on_file_and_logged():
+    store = ApplicationStore()
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    later = case.info.start_time + timedelta(days=2)
+    reply = CustomerReply(
+        received_at=later,
+        message="Here is my new pay stub. My SSN is 538-72-1904.",
+        uploads=["pay_stub"],
+        corrected_fields=["phone", "annual_income"],
+    )
+    store.record_reply(app_id, reply)
+    stored = store.get(app_id)
+    assert stored.replies == [reply]
+    event = stored.audit_log[-1]
+    assert (event.at, event.actor, event.event) == (later, "customer", "customer_replied")
+    assert event.details == "message; uploaded: pay_stub; corrected: annual_income, phone"
+    assert "538-72-1904" not in event.model_dump_json()  # the text is not logged
+
+
+def test_a_reply_with_only_a_message():
+    store = ApplicationStore()
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    store.record_reply(app_id, CustomerReply(received_at=case.info.start_time, message="Thanks!"))
+    assert store.get(app_id).audit_log[-1].details == "message"

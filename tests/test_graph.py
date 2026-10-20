@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.types import Command
 
-from loans.agent.graph import build_graph, make_model
+from loans.agent.graph import build_graph, make_model, thread_config
 from loans.agent.prompt import first_turn
 from loans.agent.tools import make_tools
 from loans.evals.case import load_case, submit_case
@@ -42,7 +43,7 @@ def run(answers, case_name="01_clean_application"):
     model = FakeModel(messages=iter(answers))
     tools = make_tools(store, app_id, lambda: case.info.start_time)
     graph = build_graph(model, tools, store, app_id)
-    result = graph.invoke({"messages": [HumanMessage(first_turn(None))]})
+    result = graph.invoke({"messages": [HumanMessage(first_turn(None))]}, thread_config(app_id))
     return store, app_id, result
 
 
@@ -88,15 +89,47 @@ def test_a_refused_finish_goes_back_to_the_llm():
     assert store.get(app_id).ending.outcome == "complete"
 
 
-def test_the_loop_stops_when_the_llm_answers_without_a_tool():
-    answers = [
-        step("send_message", {"text": "Please upload a pay stub.", "reason": "Missing."}),
-        AIMessage(content="Waiting for the customer's pay stub."),
-    ]
-    store, app_id, result = run(answers, "03_no_answer")
+WAITING = [
+    step("send_message", {"text": "Please upload a pay stub.", "reason": "Missing."}),
+    AIMessage(content="Waiting for the customer's pay stub."),
+]
+
+
+def build(answers, case_name="03_no_answer"):
+    store = ApplicationStore()
+    case = load_case(CASES / case_name)
+    app_id = submit_case(store, case)
+    tools = make_tools(store, app_id, lambda: case.info.start_time)
+    graph = build_graph(FakeModel(messages=iter(answers)), tools, store, app_id)
+    return store, app_id, graph
+
+
+def test_the_run_pauses_when_the_llm_answers_without_a_tool():
+    store, app_id, graph = build(WAITING)
+    config = thread_config(app_id)
+    result = graph.invoke({"messages": [HumanMessage(first_turn(None))]}, config)
+    assert graph.get_state(config).next == ("wait",)  # paused in the wait box
+    assert result["__interrupt__"][0].value == {"waiting": "Waiting for the customer's pay stub."}
     assert store.get(app_id).ending is None
     assert len(store.get(app_id).messages) == 1
-    assert result["messages"][-1].content == "Waiting for the customer's pay stub."
+
+
+def test_a_paused_run_resumes_with_the_news_as_a_new_message():
+    handoff = {"outcome": "sent_to_human", "reason": "agent_unsure", "explanation": "Unsure."}
+    store, app_id, graph = build([*WAITING, step("finish", handoff)])
+    config = thread_config(app_id)
+    graph.invoke({"messages": [HumanMessage(first_turn(None))]}, config)
+    result = graph.invoke(Command(resume="2 days later, the customer replied."), config)
+    news = result["messages"][-3]
+    assert (news.type, news.content) == ("human", "2 days later, the customer replied.")
+    assert store.get(app_id).ending.reason == "agent_unsure"
+    assert graph.get_state(config).next == ()  # ended, not paused
+
+
+def test_each_case_keeps_its_own_conversation():
+    store, app_id, graph = build(WAITING)
+    graph.invoke({"messages": [HumanMessage(first_turn(None))]}, thread_config(app_id))
+    assert graph.get_state(thread_config("another-case")).values == {}
 
 
 def test_a_wrong_tool_argument_is_returned_to_the_llm():

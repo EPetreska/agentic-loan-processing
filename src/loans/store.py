@@ -64,6 +64,18 @@ class SentMessage(BaseModel):
     reason: str
 
 
+class CustomerReply(BaseModel):
+    """A reply from the customer, kept on file for auditing."""
+
+    received_at: datetime
+    # The customer's own words, if they wrote any.
+    message: str | None = None
+    # The slots the customer uploaded a file into with this reply.
+    uploads: list[UploadSlot] = []
+    # The form fields the customer corrected with this reply (names only).
+    corrected_fields: list[str] = []
+
+
 class IncomeVerification(BaseModel):
     """The agent's decision that a document verifies the claimed income,
     recorded only after the bank's income rules passed."""
@@ -116,6 +128,8 @@ class StoredApplication(BaseModel):
     income_verification: IncomeVerification | None = None
     # Messages sent to the customer, oldest first.
     messages: list[SentMessage] = []
+    # Replies from the customer, oldest first.
+    replies: list[CustomerReply] = []
     # Set once the agent has ended the case.
     ending: CaseEnding | None = None
     # Everything that happened in the case, oldest first. Only ever added to.
@@ -217,6 +231,27 @@ class ApplicationStore:
     def record_message(self, application_id: str, message: SentMessage) -> None:
         """Keep a sent message on file."""
         self.get(application_id).messages.append(message)
+
+    def record_reply(self, application_id: str, reply: CustomerReply) -> None:
+        """Keep a customer reply on file and log it. The log names only the
+        uploaded slots and the corrected fields, never the message text or
+        the values; the text is kept here, with the reply. The uploads and
+        corrections themselves are applied with upload and correct_fields."""
+        self.get(application_id).replies.append(reply)
+        parts = []
+        if reply.message:
+            parts.append("message")
+        if reply.uploads:
+            parts.append("uploaded: " + ", ".join(reply.uploads))
+        if reply.corrected_fields:
+            parts.append("corrected: " + ", ".join(sorted(reply.corrected_fields)))
+        self.log_event(
+            application_id,
+            reply.received_at,
+            "customer",
+            "customer_replied",
+            "; ".join(parts) or "empty reply",
+        )
 
     def record_identity_findings(
         self, application_id: str, findings: IdentityFindings

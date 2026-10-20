@@ -11,10 +11,8 @@ Settings come from .env (see .env.example): LLM_MODEL chooses the model
 (--model overrides it for one run, handy for comparing models), and the
 LANGSMITH_* settings turn on tracing; LangGraph sends the traces by
 itself. Time is simulated: the clock starts at the case's start time and moves
-one minute per tool call.
-
-Step 1: no customer replies yet, so cases that need an answer from the
-customer stop after the agent's first message.
+one minute per tool call, and jumps forward when the customer takes days to
+answer (see loans.evals.simulate, which plays the scripted customer).
 
 This is the development entry point. In a real deployment, a web service
 takes its place: it starts the same agent when a customer submits an
@@ -27,17 +25,16 @@ clock change.
 import argparse
 import os
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage
 
-from loans.agent.graph import build_graph, make_model
-from loans.agent.prompt import PROMPT_VERSION, first_turn
-from loans.agent.tools import make_tools
+from loans.agent.graph import make_model
+from loans.agent.prompt import PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log
-from loans.evals.case import load_case, submit_case
+from loans.evals.case import load_case
+from loans.evals.simulate import simulate_case
 from loans.store import ApplicationStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,19 +43,6 @@ LOGS = ROOT / "audit_logs"
 
 # A limit on the number of loop steps, against an agent that never stops.
 MAX_STEPS = 60
-
-
-class SimulatedClock:
-    """The case's time: starts at the case's start time and moves one minute
-    each time it is read."""
-
-    def __init__(self, start: datetime) -> None:
-        self._now = start
-
-    def __call__(self) -> datetime:
-        now = self._now
-        self._now += timedelta(minutes=1)
-        return now
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -80,12 +64,10 @@ def main(argv: list[str] | None = None) -> None:
     store = ApplicationStore(
         log_dir=log_dir, agent=AgentVersion(model=model_spec, prompt_version=PROMPT_VERSION)
     )
-    application_id = submit_case(store, case)
-    tools = make_tools(store, application_id, SimulatedClock(case.info.start_time))
-    graph = build_graph(model, tools, store, application_id)
-
-    result = graph.invoke(
-        {"messages": [HumanMessage(first_turn(case.customer.first_message))]},
+    result = simulate_case(
+        case,
+        store,
+        model,
         config={
             "recursion_limit": MAX_STEPS,
             "run_name": f"case {case.case_id}",
@@ -94,13 +76,17 @@ def main(argv: list[str] | None = None) -> None:
         },
     )
 
+    application_id = result.application_id
     stored = store.get(application_id)
     print(f"case: {case.case_id}  model: {model_spec}  prompt: {PROMPT_VERSION}")
+    print(f"pauses to wait for the customer: {result.pauses}")
     if stored.ending is not None:
         print(f"ended: {stored.ending.outcome} ({stored.ending.reason})")
     else:
-        print("not ended; the agent's last words:")
-        print(result["messages"][-1].content)
+        if result.stopped_by_limit:
+            print("not ended: the agent kept waiting, so the simulation stopped")
+        print("the agent's last words:")
+        print(result.messages[-1].content)
     print()
     print(format_audit_log(stored.audit_log))
     print()

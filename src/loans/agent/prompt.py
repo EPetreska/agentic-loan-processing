@@ -14,7 +14,7 @@ the instructions.
 import hashlib
 
 from loans import policy
-from loans.spotlight import quote
+from loans.spotlight import MAX_QUOTED_MESSAGE_LENGTH, quote
 
 
 def build_system_prompt() -> str:
@@ -65,7 +65,8 @@ rule cannot be met, end the case as described below.
   {policy.INCOMPLETE_NOTICE_DAYS} days of the application.
 - A case is cancelled because the customer did not answer or did not send the
   documents only after {policy.NO_ANSWER_CANCEL_DAYS} days without an answer
-  since your last message.
+  since the last contact (your last message or the customer's last reply,
+  whichever is later).
 - Fair lending: never ask about, or let your handling be influenced by, race,
   color, religion, national origin, sex, marital status, age (beyond the
   under-18 rule) or receipt of public assistance.
@@ -142,5 +143,34 @@ def first_turn(first_message: str | None) -> str:
     quoted as untrusted text."""
     text = "A new loan application has been submitted. Process it."
     if first_message:
-        text += f"\nThe customer wrote with the application: {quote(first_message)}"
+        message = quote(first_message, MAX_QUOTED_MESSAGE_LENGTH)
+        text += f"\nThe customer wrote with the application: {message}"
     return text
+
+
+def customer_reply_turn(
+    after_days: float,
+    message: str | None,
+    uploads: list[str],
+    corrected_fields: list[str],
+) -> str:
+    """The message that resumes a case after the customer replied: their text
+    quoted as untrusted data, and only the names of what changed, never the
+    values. The agent checks the changes itself with its tools."""
+    unit = "day" if after_days == 1 else "days"
+    lines = [f"{after_days:g} {unit} later, the customer replied."]
+    if message:
+        lines.append(f"Message: {quote(message, MAX_QUOTED_MESSAGE_LENGTH)}")
+    if uploads:
+        lines.append("Uploaded: " + ", ".join(uploads))
+    if corrected_fields:
+        lines.append("Corrected on the form: " + ", ".join(sorted(corrected_fields)))
+    return "\n".join(lines)
+
+
+def no_answer_turn(days: int) -> str:
+    """The message that resumes a case after time passed with no reply."""
+    return (
+        f"{days} days have passed since the last message or reply, "
+        "with no answer from the customer."
+    )

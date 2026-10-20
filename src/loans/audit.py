@@ -32,6 +32,7 @@ EventName = Literal[
     "application_submitted",
     "document_uploaded",
     "form_corrected",
+    "customer_replied",
     # agent
     "form_checked",
     "document_read",
