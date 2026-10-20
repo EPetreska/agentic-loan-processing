@@ -168,3 +168,23 @@ def test_after_a_reply_without_documents_the_wait_counts_from_the_reply():
     assert stored.ending.reason == "documents_not_provided"
     assert stored.ending.ended_at >= stored.replies[0].received_at + timedelta(days=26)
     assert result.pauses == 2
+
+
+def test_on_message_receives_every_step_in_order():
+    seen = []
+    store = ApplicationStore()
+    case = load_case(CASES / "02_maria_job_change")
+    simulate_case(case, store, FakeModel(messages=iter(MARIA)), on_message=seen.append)
+    kinds = [m.type for m in seen]
+    # start, then (agent call, tool result) x2, the wait text, the news, ...
+    assert kinds[:7] == ["human", "ai", "tool", "ai", "tool", "ai", "human"]
+    assert seen[6].content.startswith("2 days later, the customer replied.")
+    assert seen[-1].type == "tool" and seen[-1].name == "finish"
+
+
+def test_streaming_gives_the_same_result_as_without():
+    store_a, store_b = ApplicationStore(), ApplicationStore()
+    case = load_case(CASES / "02_maria_job_change")
+    a = simulate_case(case, store_a, FakeModel(messages=iter(MARIA)))
+    b = simulate_case(case, store_b, FakeModel(messages=iter(MARIA)), on_message=lambda m: None)
+    assert [m.content for m in a.messages] == [m.content for m in b.messages]

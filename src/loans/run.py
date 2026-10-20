@@ -2,6 +2,12 @@
 
     uv run python -m loans.run 01_clean_application
     uv run python -m loans.run 01_clean_application --model ollama:qwen3:8b
+    uv run python -m loans.run 01_clean_application --show
+
+With --show, every step is printed as it happens: the agent's thinking (for
+models that think out loud), its tool calls, the tool results, and the
+messages that start and resume the case. The thinking is the model's own
+account, a useful view but not a guaranteed record of why it acted.
 
 Submits the case's application, runs the agent on it, and prints the result
 and the audit log as a table. Every audit event is written to
@@ -29,6 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from loans.agent.graph import make_model
 from loans.agent.prompt import PROMPT_VERSION
@@ -45,12 +52,44 @@ LOGS = ROOT / "audit_logs"
 MAX_STEPS = 60
 
 
+def format_message(message: BaseMessage) -> str:
+    """One message of the conversation, for --show."""
+    if isinstance(message, AIMessage):
+        lines = []
+        thinking = message.additional_kwargs.get("reasoning_content")
+        if thinking:
+            lines.append(_block("thinking", thinking))
+        if message.content:
+            lines.append(_block("agent", str(message.content)))
+        for call in message.tool_calls:
+            args = ", ".join(f"{name}={value!r}" for name, value in call["args"].items())
+            lines.append(f"[agent] calls {call['name']}({args})")
+        return "\n".join(lines)
+    if isinstance(message, ToolMessage):
+        return _block(f"tool {message.name}", str(message.content))
+    return _block("news", str(message.content))
+
+
+def _block(label: str, text: str) -> str:
+    """A labeled block; continuation lines are indented under the label."""
+    first, *rest = text.strip().splitlines() or [""]
+    return "\n".join([f"[{label}] {first}", *(f"    {line}" for line in rest)])
+
+
+def _print_message(message: BaseMessage) -> None:
+    print(format_message(message), flush=True)
+    print(flush=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Run one eval case with the agent.")
     parser.add_argument("case", help="a case folder name, for example 01_clean_application")
     parser.add_argument(
         "--model", help="the model for this run, for example ollama:qwen3:8b (default: LLM_MODEL)"
+    )
+    parser.add_argument(
+        "--show", action="store_true", help="print each step as it happens, with the thinking"
     )
     args = parser.parse_args(argv)
 
@@ -74,6 +113,7 @@ def main(argv: list[str] | None = None) -> None:
             "tags": [case.case_id],
             "metadata": {"model": model_spec, "prompt_version": PROMPT_VERSION},
         },
+        on_message=_print_message if args.show else None,
     )
 
     application_id = result.application_id

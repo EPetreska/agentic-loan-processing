@@ -24,6 +24,7 @@ it with the news. The run script uses this for one case; the eval runner
 will use it for many.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -82,8 +83,13 @@ def simulate_case(
     model: BaseChatModel,
     config: dict | None = None,
     max_pauses: int = MAX_PAUSES,
+    on_message: Callable[[BaseMessage], None] | None = None,
 ) -> SimulationResult:
-    """Run the agent on one case until the case ends or the limit is hit."""
+    """Run the agent on one case until the case ends or the limit is hit.
+
+    on_message, if given, is called with every new message as it happens: the
+    message that starts the case, each answer of the agent, each tool result,
+    and each message that resumes the case. run.py --show prints them."""
     application_id = submit_case(store, case)
     clock = SimulatedClock(case.info.start_time)
     graph = build_graph(model, make_tools(store, application_id, clock), store, application_id)
@@ -92,9 +98,12 @@ def simulate_case(
     answered = 0  # how many of the agent's messages the customer has reacted to
     pauses = 0
 
-    run_input = {"messages": [HumanMessage(first_turn(case.customer.first_message))]}
+    start = HumanMessage(first_turn(case.customer.first_message))
+    if on_message:
+        on_message(start)
+    run_input = {"messages": [start]}
     while True:
-        messages = graph.invoke(run_input, config)["messages"]
+        messages = _run(graph, run_input, config, on_message)
         stored = store.get(application_id)
         if stored.ending is not None:
             return SimulationResult(application_id, messages, pauses, False)
@@ -116,6 +125,22 @@ def simulate_case(
             clock.jump_to((last_contact(stored) or clock()) + timedelta(days=days))
             news = no_answer_turn(days)
         run_input = Command(resume=news)  # continue the paused run with the news
+
+
+def _run(graph, run_input, config: dict, on_message) -> list[BaseMessage]:
+    """Run until the next pause or the end, and return the whole conversation.
+    With on_message, the run is streamed step by step and each new message is
+    passed on as it arrives."""
+    if on_message is None:
+        graph.invoke(run_input, config)
+    else:
+        for update in graph.stream(run_input, config, stream_mode="updates"):
+            for node, values in update.items():
+                if node.startswith("__"):  # for example __interrupt__: the pause itself
+                    continue
+                for message in (values or {}).get("messages", []):
+                    on_message(message)
+    return graph.get_state(config).values["messages"]
 
 
 def _apply_reply(

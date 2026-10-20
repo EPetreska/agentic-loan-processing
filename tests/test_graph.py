@@ -144,6 +144,7 @@ def test_make_model_reads_the_setting():
     model = make_model("ollama:qwen3:4b")
     assert model.model == "qwen3:4b"
     assert model.num_ctx == 16_384  # not Ollama's small default
+    assert model.reasoning is True  # thinking returned separately, not in the answer
 
 
 def test_make_model_rejects_an_unknown_setting():

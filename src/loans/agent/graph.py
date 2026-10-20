@@ -44,7 +44,11 @@ def make_model(spec: str) -> BaseChatModel:
     if provider == "ollama" and name:
         from langchain_ollama import ChatOllama
 
-        return ChatOllama(model=name, num_ctx=OLLAMA_CONTEXT_TOKENS)
+        # reasoning=True returns a thinking model's reasoning separately
+        # (additional_kwargs["reasoning_content"]) instead of mixed into the
+        # answer between <think> tags, so the answer stays clean and the
+        # reasoning can be shown on its own (run.py --show).
+        return ChatOllama(model=name, num_ctx=OLLAMA_CONTEXT_TOKENS, reasoning=True)
     if provider == "anthropic" and name:
         from langchain_anthropic import ChatAnthropic  # added when switching
 
