@@ -12,6 +12,7 @@ the instructions.
 """
 
 import hashlib
+from datetime import date
 
 from loans import policy
 from loans.spotlight import MAX_QUOTED_MESSAGE_LENGTH, quote
@@ -42,9 +43,10 @@ rule cannot be met, end the case as described below.
   match, ask the customer about it (for example for an updated ID after a name
   change); if the difference cannot be resolved, send the case to a human
   (identity_review).
-- Income can be verified only for employed applicants (with a pay stub or a
-  W-2) and self-employed applicants (with a tax return). For any other
-  employment status, send the case to a human (other_employment).
+- Which documents can verify income depends on the employment status on the
+  form. Employed: only a pay stub or a W-2. Self-employed: only a tax return.
+  Any other status: no document can; send the case to a human
+  (other_employment).
 - An income document counts only if it is readable and really is the document
   of its slot. A pay stub counts only if its pay date is at most
   {policy.PAY_STUB_MAX_AGE_DAYS} days old. A W-2 or a tax return counts only if
@@ -97,7 +99,8 @@ These tools are the only way to see the application and act on it. You never
 see the raw form, the documents or the customer's contact details, only what
 the tools return.
 
-- check_application: checks every field of the form.
+- check_application: checks that the form is filled in correctly (not the ID
+  or the documents themselves).
 - read_document: reads an uploaded income document (pay_stub, w2 or
   tax_return), with the bank's income rules applied to it.
 - verify_identity: compares the uploaded ID with the form.
@@ -138,10 +141,17 @@ SYSTEM_PROMPT = build_system_prompt()
 PROMPT_VERSION = hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()[:8]
 
 
-def first_turn(first_message: str | None) -> str:
-    """The message that starts a case, with the customer's own first message
-    quoted as untrusted text."""
-    text = "A new loan application has been submitted. Process it."
+def _today(today: date) -> str:
+    # The agent cannot see a clock, and on its own it would assume the year it
+    # remembers from training; every message that starts or resumes a case
+    # tells it the date (simulated in the evals, real in production).
+    return f"Today is {today.isoformat()}."
+
+
+def first_turn(first_message: str | None, today: date) -> str:
+    """The message that starts a case, with today's date and the customer's
+    own first message quoted as untrusted text."""
+    text = f"{_today(today)} A new loan application has been submitted. Process it."
     if first_message:
         message = quote(first_message, MAX_QUOTED_MESSAGE_LENGTH)
         text += f"\nThe customer wrote with the application: {message}"
@@ -153,12 +163,13 @@ def customer_reply_turn(
     message: str | None,
     uploads: list[str],
     corrected_fields: list[str],
+    today: date,
 ) -> str:
     """The message that resumes a case after the customer replied: their text
     quoted as untrusted data, and only the names of what changed, never the
     values. The agent checks the changes itself with its tools."""
     unit = "day" if after_days == 1 else "days"
-    lines = [f"{after_days:g} {unit} later, the customer replied."]
+    lines = [f"{_today(today)} {after_days:g} {unit} later, the customer replied."]
     if message:
         lines.append(f"Message: {quote(message, MAX_QUOTED_MESSAGE_LENGTH)}")
     if uploads:
@@ -168,9 +179,9 @@ def customer_reply_turn(
     return "\n".join(lines)
 
 
-def no_answer_turn(days: int) -> str:
+def no_answer_turn(days: int, today: date) -> str:
     """The message that resumes a case after time passed with no reply."""
     return (
-        f"{days} days have passed since the last message or reply, "
+        f"{_today(today)} {days} days have passed since the last message or reply, "
         "with no answer from the customer."
     )

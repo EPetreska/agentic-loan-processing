@@ -4,14 +4,23 @@
     uv run python -m loans.run 01_clean_application --model ollama:qwen3:8b
     uv run python -m loans.run 01_clean_application --show
 
-With --show, every step is printed as it happens: the agent's thinking (for
-models that think out loud), its tool calls, the tool results, and the
-messages that start and resume the case. The thinking is the model's own
+With --show, the run is printed as it happens: the agent's thinking (for
+models that think out loud) and text word by word while the model writes
+them, then its tool calls, the tool results, and the messages that start and
+resume the case. The thinking is the model's own
 account, a useful view but not a guaranteed record of why it acted.
 
 Submits the case's application, runs the agent on it, and prints the result
-and the audit log as a table. Every audit event is written to
-audit_logs/<run time>/<case>.jsonl as it happens.
+and the audit log as a table. Each run gets a folder, with one folder per
+case inside:
+
+    runs/<run time>/<case>/
+        audit.jsonl          the audit log, written event by event as it happens
+        conversation.json    the messages between the agent and the customer,
+                             written at the end (also if the run fails halfway)
+
+The conversation is kept so it can be reviewed and checked by the evals; the
+audit log itself keeps no message text.
 
 Settings come from .env (see .env.example): LLM_MODEL chooses the model
 (--model overrides it for one run, handy for comparing models), and the
@@ -29,6 +38,7 @@ clock change.
 """
 
 import argparse
+import json
 import os
 import sys
 from datetime import UTC, datetime
@@ -40,26 +50,65 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from loans.agent.graph import make_model
 from loans.agent.prompt import PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log
-from loans.evals.case import load_case
+from loans.evals.case import EvalCase, load_case
 from loans.evals.simulate import simulate_case
-from loans.store import ApplicationStore
+from loans.store import ApplicationStore, StoredApplication
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "evals" / "cases"
-LOGS = ROOT / "audit_logs"
+RUNS = ROOT / "runs"
 
 # A limit on the number of loop steps, against an agent that never stops.
 MAX_STEPS = 60
 
 
-def format_message(message: BaseMessage) -> str:
-    """One message of the conversation, for --show."""
+def conversation(case: EvalCase, stored: StoredApplication) -> list[dict]:
+    """The messages between the agent and the customer, oldest first: the
+    customer's message sent with the application, the agent's messages and
+    the customer's replies."""
+    entries = []
+    if case.customer.first_message:
+        entries.append(
+            {
+                "at": stored.metadata.submitted_at,
+                "from": "customer",
+                "text": case.customer.first_message,
+                "with_application": True,
+            }
+        )
+    entries += [
+        {"at": m.sent_at, "from": "agent", "text": m.text, "reason": m.reason}
+        for m in stored.messages
+    ]
+    entries += [
+        {
+            "at": r.received_at,
+            "from": "customer",
+            "text": r.message,
+            "uploads": r.uploads,
+            "corrected_fields": r.corrected_fields,
+        }
+        for r in stored.replies
+    ]
+    entries.sort(key=lambda entry: entry["at"])  # stable: equal times keep their order
+    return [{**entry, "at": entry["at"].isoformat()} for entry in entries]
+
+
+def write_conversation(path: Path, case: EvalCase, stored: StoredApplication) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(conversation(case, stored), indent=2) + "\n")
+
+
+def format_message(message: BaseMessage, with_text: bool = True) -> str:
+    """One message of the conversation, for --show. with_text=False leaves
+    out the agent's thinking and text, when they were already printed word by
+    word as the model wrote them."""
     if isinstance(message, AIMessage):
         lines = []
         thinking = message.additional_kwargs.get("reasoning_content")
-        if thinking:
+        if thinking and with_text:
             lines.append(_block("thinking", thinking))
-        if message.content:
+        if message.content and with_text:
             lines.append(_block("agent", str(message.content)))
         for call in message.tool_calls:
             args = ", ".join(f"{name}={value!r}" for name, value in call["args"].items())
@@ -76,9 +125,32 @@ def _block(label: str, text: str) -> str:
     return "\n".join([f"[{label}] {first}", *(f"    {line}" for line in rest)])
 
 
-def _print_message(message: BaseMessage) -> None:
-    print(format_message(message), flush=True)
-    print(flush=True)
+class LivePrinter:
+    """Prints a run as it happens, for --show: the model's thinking and text
+    word by word while it writes them, then each tool call, tool result and
+    message that starts or resumes the case."""
+
+    LABELS = {"thinking": "[thinking] ", "answer": "[agent] "}
+
+    def __init__(self) -> None:
+        self._streaming: str | None = None  # what is being printed word by word
+
+    def token(self, kind: str, text: str) -> None:
+        if kind != self._streaming:
+            if self._streaming is not None:
+                print("\n", flush=True)
+            print(self.LABELS[kind], end="", flush=True)
+            self._streaming = kind
+        print(text, end="", flush=True)
+
+    def message(self, message: BaseMessage) -> None:
+        if self._streaming is not None:
+            print("\n", flush=True)
+            self._streaming = None
+        text = format_message(message, with_text=not isinstance(message, AIMessage))
+        if text:
+            print(text, flush=True)
+            print(flush=True)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -99,22 +171,30 @@ def main(argv: list[str] | None = None) -> None:
 
     model = make_model(model_spec)  # first, so a wrong setting fails before anything is logged
     case = load_case(CASES / args.case)
-    log_dir = LOGS / datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
+    run_dir = RUNS / datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     store = ApplicationStore(
-        log_dir=log_dir, agent=AgentVersion(model=model_spec, prompt_version=PROMPT_VERSION)
+        run_dir=run_dir, agent=AgentVersion(model=model_spec, prompt_version=PROMPT_VERSION)
     )
-    result = simulate_case(
-        case,
-        store,
-        model,
-        config={
-            "recursion_limit": MAX_STEPS,
-            "run_name": f"case {case.case_id}",
-            "tags": [case.case_id],
-            "metadata": {"model": model_spec, "prompt_version": PROMPT_VERSION},
-        },
-        on_message=_print_message if args.show else None,
-    )
+    printer = LivePrinter()
+    case_dir = run_dir / case.case_id
+    conversation_file = case_dir / "conversation.json"
+    try:
+        result = simulate_case(
+            case,
+            store,
+            model,
+            config={
+                "recursion_limit": MAX_STEPS,
+                "run_name": f"case {case.case_id}",
+                "tags": [case.case_id],
+                "metadata": {"model": model_spec, "prompt_version": PROMPT_VERSION},
+            },
+            **({"on_message": printer.message, "on_token": printer.token} if args.show else {}),
+        )
+    finally:
+        # Also if the run fails halfway, the messages so far are kept.
+        if store.has(case.case_id):
+            write_conversation(conversation_file, case, store.get(case.case_id))
 
     application_id = result.application_id
     stored = store.get(application_id)
@@ -130,7 +210,7 @@ def main(argv: list[str] | None = None) -> None:
     print()
     print(format_audit_log(stored.audit_log))
     print()
-    print(f"log file: {log_dir / f'{application_id}.jsonl'}")
+    print(f"files: {case_dir}/ (audit.jsonl, conversation.json)")
 
 
 if __name__ == "__main__":

@@ -71,7 +71,7 @@ def test_the_reply_is_shown_to_the_agent():
     _, _, result = simulate("02_maria_job_change", MARIA)
     reply = next(m for m in result.messages if "the customer replied" in m.content)
     assert reply.content.splitlines() == [
-        "2 days later, the customer replied.",
+        "Today is 2026-09-16. 2 days later, the customer replied.",
         'Message: "Here is my latest pay stub with the new pay rate."',
         "Uploaded: pay_stub",
     ]
@@ -100,7 +100,8 @@ def test_robert_does_not_answer_and_the_case_is_cancelled():
     assert stored.ending.ended_at >= stored.messages[0].sent_at + timedelta(days=26)
     news = [m.content for m in result.messages if "days have passed" in m.content]
     assert news == [
-        "26 days have passed since the last message or reply, with no answer from the customer."
+        "Today is 2026-10-10. 26 days have passed since the last message or reply, "
+        "with no answer from the customer."
     ]
 
 
@@ -178,7 +179,7 @@ def test_on_message_receives_every_step_in_order():
     kinds = [m.type for m in seen]
     # start, then (agent call, tool result) x2, the wait text, the news, ...
     assert kinds[:7] == ["human", "ai", "tool", "ai", "tool", "ai", "human"]
-    assert seen[6].content.startswith("2 days later, the customer replied.")
+    assert seen[6].content.startswith("Today is 2026-09-16. 2 days later, the customer replied.")
     assert seen[-1].type == "tool" and seen[-1].name == "finish"
 
 
@@ -188,3 +189,18 @@ def test_streaming_gives_the_same_result_as_without():
     a = simulate_case(case, store_a, FakeModel(messages=iter(MARIA)))
     b = simulate_case(case, store_b, FakeModel(messages=iter(MARIA)), on_message=lambda m: None)
     assert [m.content for m in a.messages] == [m.content for m in b.messages]
+
+
+def test_on_token_receives_the_agents_words_while_it_writes():
+    words = []
+    store = ApplicationStore()
+    case = load_case(CASES / "03_no_answer")
+    simulate_case(
+        case,
+        store,
+        FakeModel(messages=iter([wait("Waiting for the pay stub.")])),
+        max_pauses=0,  # stop at the first pause; the words are what matters here
+        on_token=lambda kind, text: words.append((kind, text)),
+    )
+    assert "".join(text for kind, text in words if kind == "answer") == "Waiting for the pay stub."
+    assert len(words) > 1  # in pieces, as written, not all at once

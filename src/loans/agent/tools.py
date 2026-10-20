@@ -39,8 +39,9 @@ def make_tools(
 
     @tool
     def check_application() -> str:
-        """Check every field of the application form. Returns one line per
-        field: ok, error or warning. For fields such as the name, employer,
+        """Check that the application form is filled in correctly. Returns one
+        line per field: ok, error or warning. It checks the form only: it does
+        not compare the ID with the form or read the income documents. For fields such as the name, employer,
         income and loan, it also shows the customer's value: the checked
         value when ok (free text in quotes), and exactly what was typed, in
         quotes, when there is an error. Sensitive fields such as the SSN and
@@ -95,7 +96,7 @@ def make_tools(
     )
     def send_message(
         text: Annotated[str, "The message to the customer."],
-        reason: Annotated[str, "Why you are sending it."],
+        reason: Annotated[str, "Why you are sending it, in a short sentence."],
         call_id: CallId,
     ) -> str:
         return _send_message(

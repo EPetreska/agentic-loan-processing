@@ -6,10 +6,11 @@ application ID, looks up what it needs here, and returns a safe result
 (reference passing). For now the store lives in memory and is filled from the
 eval cases; later it moves to Postgres without changing the tools.
 
-If the store is given a log folder, every audit event is also written to the
-case's log file (one JSON line per event) the moment it happens, so a person
-can review the log at any time and a crash loses nothing. The tests use no
-folder, so nothing is written to disk.
+If the store is given a run folder, every audit event is also written to the
+case's log file, <run folder>/<application ID>/audit.jsonl (one JSON line per
+event), the moment it happens, so a person can review the log at any time and
+a crash loses nothing. The tests use no folder, so nothing is written to
+disk.
 """
 
 from datetime import date, datetime
@@ -158,10 +159,10 @@ class StoredApplication(BaseModel):
 
 class ApplicationStore:
     def __init__(
-        self, log_dir: Path | None = None, agent: AgentVersion | None = None
+        self, run_dir: Path | None = None, agent: AgentVersion | None = None
     ) -> None:
         self._applications: dict[str, StoredApplication] = {}
-        self._log_dir = log_dir
+        self._run_dir = run_dir
         # Added to agent and guardrail events.
         self._agent = agent
 
@@ -199,6 +200,9 @@ class ApplicationStore:
             "uploaded: " + (", ".join(sorted(documents)) or "nothing"),
         )
         return metadata.application_id
+
+    def has(self, application_id: str) -> bool:
+        return application_id in self._applications
 
     def get(self, application_id: str) -> StoredApplication:
         try:
@@ -306,7 +310,7 @@ class ApplicationStore:
         reason: str | None = None,
     ) -> None:
         """Add one event to the case's audit log, and to its log file if the
-        store has a log folder."""
+        store has a run folder."""
         agent = self._agent if actor in ("agent", "guardrail") else None
         audit_event = AuditEvent(
             application_id=application_id,
@@ -319,9 +323,10 @@ class ApplicationStore:
             prompt_version=agent.prompt_version if agent else None,
         )
         self.get(application_id).audit_log.append(audit_event)
-        if self._log_dir is not None:
-            self._log_dir.mkdir(parents=True, exist_ok=True)
-            with (self._log_dir / f"{application_id}.jsonl").open("a") as f:
+        if self._run_dir is not None:
+            case_dir = self._run_dir / application_id
+            case_dir.mkdir(parents=True, exist_ok=True)
+            with (case_dir / "audit.jsonl").open("a") as f:
                 f.write(audit_event.model_dump_json() + "\n")
 
     def refuse_if_ended(self, application_id: str, now: datetime, tool: str) -> str | None:

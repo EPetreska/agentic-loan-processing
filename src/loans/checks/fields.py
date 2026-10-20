@@ -120,7 +120,7 @@ class FieldCheckResult(BaseModel):
         errors = sum(r.status == "error" for r in self.results)
         warnings = sum(r.status == "warning" for r in self.results)
         header = (
-            f"complete: {'yes' if self.complete else 'no'} "
+            f"form complete: {'yes' if self.complete else 'no'} "
             f"({_count(errors, 'error')}, {_count(warnings, 'warning')})"
         )
         lines = [f"{r.status}: {r.field}: {r.message}" for r in self.results]
@@ -288,9 +288,23 @@ def _valid_fields(
         else:
             results.append(_ok("date_of_birth", "ok"))
 
-    for field in ("ssn", "address", "phone", "email", "id_document"):
+    for field in ("ssn", "address", "phone", "email"):
         if valid(field):
             results.append(_ok(field, "ok"))
+
+    # The ID and income lines say what they cover, so "ok" is not read as
+    # "the ID is verified" or "the income is proven": this check sees only the
+    # form; the documents themselves are checked by other tools.
+    if valid("id_document"):
+        id_document = _parse("id_document", raw["id_document"])
+        sides = "front and back" if id_document.back else "front"
+        results.append(
+            _ok(
+                "id_document",
+                f"{id_document.type}, {sides} uploaded (the form only; the ID itself "
+                "is compared with verify_identity)",
+            )
+        )
 
 
     if valid("employment_status"):
@@ -309,6 +323,7 @@ def _valid_fields(
         slots = raw["income_documents"]
         uploaded = [slot for slot, file in slots.items() if file is not None]
         message = "uploaded: " + ", ".join(uploaded) if uploaded else "none uploaded"
+        message += " (the form only; the documents themselves are read with read_document)"
         results.append(_ok("income_documents", message))
 
     # The housing payment is not proven by any document, so this warning is

@@ -21,13 +21,13 @@ def submitted(name: str) -> tuple[ApplicationStore, str, EvalCase]:
 def test_clean_application_is_complete():
     store, app_id, case = submitted("01_clean_application")
     text = check_application(store, app_id, case.info.start_time)
-    assert text.splitlines()[0] == "complete: yes (0 errors, 0 warnings)"
+    assert text.splitlines()[0] == "form complete: yes (0 errors, 0 warnings)"
 
 
 def test_missing_income_document_is_reported():
     store, app_id, case = submitted("03_no_answer")
     text = check_application(store, app_id, case.info.start_time)
-    assert text.splitlines()[0] == "complete: no (1 error, 0 warnings)"
+    assert text.splitlines()[0] == "form complete: no (1 error, 0 warnings)"
     assert "error: income_documents: a pay stub or W-2 is required" in text
 
 
@@ -37,7 +37,7 @@ def test_result_follows_a_later_upload():
     w2 = load_case(CASES / "01_clean_application").documents["w2.json"]
     store.upload(app_id, "w2", w2, RawFile(filename="w2.pdf", content_type="application/pdf"), now=case.info.start_time)
     text = check_application(store, app_id, case.info.start_time)
-    assert text.startswith("complete: yes")
+    assert text.startswith("form complete: yes")
 
 
 def test_result_follows_a_correction():
@@ -46,7 +46,7 @@ def test_result_follows_a_correction():
     text = check_application(store, app_id, case.info.start_time)
     assert 'error: annual_income: not a number (customer entered "78k")' in text
     store.correct_fields(app_id, {"annual_income": "78000"}, now=case.info.start_time)
-    assert check_application(store, app_id, case.info.start_time).startswith("complete: yes")
+    assert check_application(store, app_id, case.info.start_time).startswith("form complete: yes")
 
 
 @pytest.mark.parametrize(
@@ -82,3 +82,24 @@ def test_only_the_given_application_is_checked():
 def test_unknown_application():
     with pytest.raises(UnknownApplication):
         check_application(ApplicationStore(), "nope", load_case(CASES / "01_clean_application").info.start_time)
+
+
+def test_id_and_income_lines_say_they_cover_the_form_only():
+    store = ApplicationStore()
+    case = load_case(CASES / "01_clean_application")
+    lines = check_application(store, submit_case(store, case), case.info.start_time).splitlines()
+    assert (
+        "ok: id_document: drivers_license, front and back uploaded "
+        "(the form only; the ID itself is compared with verify_identity)"
+    ) in lines
+    assert (
+        "ok: income_documents: uploaded: pay_stub, w2 "
+        "(the form only; the documents themselves are read with read_document)"
+    ) in lines
+
+
+def test_a_passport_has_only_a_front():
+    store = ApplicationStore()
+    case = load_case(CASES / "04_retiree_other_employment")
+    text = check_application(store, submit_case(store, case), case.info.start_time)
+    assert "ok: id_document: passport, front uploaded (the form only;" in text

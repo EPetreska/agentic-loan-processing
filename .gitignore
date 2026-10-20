@@ -18,5 +18,5 @@ __pycache__/
 .idea/
 .DS_Store
 
-# Audit logs written by runs
-audit_logs/
+# Run output: audit logs and conversations (runs/<run time>/<case>/)
+runs/

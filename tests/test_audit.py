@@ -78,7 +78,7 @@ def test_details_and_reasons():
     run_maria(store, app_id, case)
     log = {e.event: e for e in reversed(store.get(app_id).audit_log)}  # first of each
     assert log["application_submitted"].details == "uploaded: id_back, id_front, pay_stub, w2"
-    assert log["form_checked"].details == "complete: yes (0 errors, 0 warnings)"
+    assert log["form_checked"].details == "form complete: yes (0 errors, 0 warnings)"
     assert log["document_read"].details == "pay_stub: bank income rules not met"
     assert log["message_sent"].reason == "Pay stub too old."
     assert log["document_uploaded"].details == "pay_stub"
@@ -224,10 +224,10 @@ def test_reason_with_line_breaks_stays_on_one_line():
 
 
 def test_events_are_written_to_the_case_file_as_they_happen(tmp_path):
-    store = ApplicationStore(log_dir=tmp_path)
+    store = ApplicationStore(run_dir=tmp_path)
     case = load_case(CASES / "02_maria_job_change")
     app_id = submit_case(store, case)
-    path = tmp_path / f"{app_id}.jsonl"
+    path = tmp_path / app_id / "audit.jsonl"
     assert len(path.read_text().splitlines()) == 1  # the submission, right away
     check_application(store, app_id, case.info.start_time)
     lines = path.read_text().splitlines()
@@ -257,10 +257,10 @@ def test_agent_and_guardrail_events_name_the_model_and_prompt():
 
 
 def test_a_saved_file_reads_back_as_the_same_table(tmp_path):
-    store = ApplicationStore(log_dir=tmp_path)
+    store = ApplicationStore(run_dir=tmp_path)
     case = load_case(CASES / "02_maria_job_change")
     app_id = submit_case(store, case)
     run_maria(store, app_id, case)
-    saved = read_audit_log(tmp_path / f"{app_id}.jsonl")
+    saved = read_audit_log(tmp_path / app_id / "audit.jsonl")
     assert saved == store.get(app_id).audit_log
     assert format_audit_log(saved) == format_audit_log(store.get(app_id).audit_log)

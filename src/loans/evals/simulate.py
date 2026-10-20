@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage
 from langgraph.types import Command
 
 from loans import policy
@@ -61,6 +61,11 @@ class SimulatedClock:
         self._now += timedelta(minutes=1)
         return now
 
+    @property
+    def now(self) -> datetime:
+        """The current time, without moving the clock."""
+        return self._now
+
     def jump_to(self, time: datetime) -> None:
         """Move forward to this time; never backward."""
         self._now = max(self._now, time)
@@ -84,12 +89,15 @@ def simulate_case(
     config: dict | None = None,
     max_pauses: int = MAX_PAUSES,
     on_message: Callable[[BaseMessage], None] | None = None,
+    on_token: Callable[[str, str], None] | None = None,
 ) -> SimulationResult:
     """Run the agent on one case until the case ends or the limit is hit.
 
     on_message, if given, is called with every new message as it happens: the
     message that starts the case, each answer of the agent, each tool result,
-    and each message that resumes the case. run.py --show prints them."""
+    and each message that resumes the case. on_token, if given, is called with
+    the model's words while it writes them, as ("thinking", text) or
+    ("answer", text). run.py --show uses both."""
     application_id = submit_case(store, case)
     clock = SimulatedClock(case.info.start_time)
     graph = build_graph(model, make_tools(store, application_id, clock), store, application_id)
@@ -98,12 +106,12 @@ def simulate_case(
     answered = 0  # how many of the agent's messages the customer has reacted to
     pauses = 0
 
-    start = HumanMessage(first_turn(case.customer.first_message))
+    start = HumanMessage(first_turn(case.customer.first_message, clock.now.date()))
     if on_message:
         on_message(start)
     run_input = {"messages": [start]}
     while True:
-        messages = _run(graph, run_input, config, on_message)
+        messages = _run(graph, run_input, config, on_message, on_token)
         stored = store.get(application_id)
         if stored.ending is not None:
             return SimulationResult(application_id, messages, pauses, False)
@@ -123,19 +131,31 @@ def simulate_case(
             days = policy.NO_ANSWER_CANCEL_DAYS
             # The same count finish uses: from the last message or reply.
             clock.jump_to((last_contact(stored) or clock()) + timedelta(days=days))
-            news = no_answer_turn(days)
+            news = no_answer_turn(days, clock.now.date())
         run_input = Command(resume=news)  # continue the paused run with the news
 
 
-def _run(graph, run_input, config: dict, on_message) -> list[BaseMessage]:
+def _run(graph, run_input, config: dict, on_message, on_token) -> list[BaseMessage]:
     """Run until the next pause or the end, and return the whole conversation.
-    With on_message, the run is streamed step by step and each new message is
-    passed on as it arrives."""
-    if on_message is None:
+    With on_message or on_token, the run is streamed: finished messages step
+    by step ("updates"), and the model's words as it writes them
+    ("messages")."""
+    if on_message is None and on_token is None:
         graph.invoke(run_input, config)
-    else:
-        for update in graph.stream(run_input, config, stream_mode="updates"):
-            for node, values in update.items():
+        return graph.get_state(config).values["messages"]
+
+    modes = ["updates", "messages"] if on_token else ["updates"]
+    for mode, data in graph.stream(run_input, config, stream_mode=modes):
+        if mode == "messages":
+            chunk, _ = data
+            if isinstance(chunk, AIMessageChunk):
+                thinking = chunk.additional_kwargs.get("reasoning_content")
+                if thinking:
+                    on_token("thinking", thinking)
+                if isinstance(chunk.content, str) and chunk.content:
+                    on_token("answer", chunk.content)
+        elif on_message:
+            for node, values in data.items():
                 if node.startswith("__"):  # for example __interrupt__: the pause itself
                     continue
                 for message in (values or {}).get("messages", []):
@@ -167,5 +187,9 @@ def _apply_reply(
         store.correct_fields(application_id, reply.changes, now=received_at)
 
     return customer_reply_turn(
-        reply.after_days, reply.message, list(reply.uploads), list(reply.changes)
+        reply.after_days,
+        reply.message,
+        list(reply.uploads),
+        list(reply.changes),
+        received_at.date(),
     )

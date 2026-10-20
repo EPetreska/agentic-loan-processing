@@ -95,7 +95,7 @@ def test_a_wrong_slot_is_rejected_before_the_tool_runs():
 
 def test_a_full_case_through_the_wrappers():
     store, app_id, tools = daniel()
-    assert call(tools["check_application"], {}).startswith("complete: yes")
+    assert call(tools["check_application"], {}).startswith("form complete: yes")
     assert "bank income rules: met" in call(tools["read_document"], {"slot": "pay_stub"})
     assert "name_matches_form: yes" in call(tools["verify_identity"], {})
     call(tools["mark_income_verified"], {"slot": "pay_stub", "reason": "Matches."}, "c1")

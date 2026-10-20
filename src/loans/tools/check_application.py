@@ -31,6 +31,6 @@ def check_application(store: ApplicationStore, application_id: str, now: datetim
         return refusal
     stored = store.get(application_id)
     text = check_fields(stored.raw, stored.metadata, now.date()).to_llm_text()
-    summary = text.splitlines()[0]  # for example "complete: no (1 error, 0 warnings)"
+    summary = text.splitlines()[0]  # for example "form complete: no (1 error, 0 warnings)"
     store.log_event(application_id, now, "agent", "form_checked", summary)
     return text

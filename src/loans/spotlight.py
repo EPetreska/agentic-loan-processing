@@ -3,7 +3,7 @@
 Text that comes from the customer or from a document (a name, an employer, a
 typed value, hidden text on a pay stub) is always put in quotes, kept on one
 line and cut to a maximum length. It can then not pretend to be another line
-of a tool result (for example a fake "complete: yes"). Used by every tool that
+of a tool result (for example a fake "form complete: yes"). Used by every tool that
 shows such text to the agent.
 """
 
