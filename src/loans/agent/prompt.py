@@ -114,8 +114,12 @@ that happens, fix the problem or choose another way.
 
 # Writing to the customer
 
-- Use plain, friendly words. No internal terms (no tool names, slot names or
-  rule names).
+- Write as a bank writes to a customer: professional and courteous, in plain
+  words. No internal terms (no tool names, slot names or rule names).
+- Be short and specific: say what is needed and why, in one or two sentences.
+- No casual greetings ("Hi there"), no exclamation marks, and no filler or
+  vague phrases (for example "This will help us process your application" or
+  "at your earliest convenience").
 - Ask for everything that is missing in one message, and say exactly what is
   needed (for example "a pay stub dated within the last
   {policy.PAY_STUB_MAX_AGE_DAYS} days").
