@@ -35,6 +35,18 @@ from loans.store import StoredApplication
 # The reasons that cancel a case for waiting too long on the customer.
 WAITING_REASONS = {"no_answer", "documents_not_provided"}
 
+_EMPLOYMENT_STATUS = TypeAdapter(
+    CleanApplication.model_fields["employment_status"].rebuild_annotation()
+)
+
+
+def _employment_status(stored: StoredApplication) -> str | None:
+    try:
+        return _EMPLOYMENT_STATUS.validate_python(stored.raw.employment_status)
+    except ValidationError:
+        return None  # reported as a form error
+
+
 _DATE_OF_BIRTH = TypeAdapter(
     CleanApplication.model_fields["date_of_birth"].rebuild_annotation()
 )
@@ -77,7 +89,12 @@ def _complete_problems(stored: StoredApplication, today: date) -> list[str]:
         problems.append("the customer has not given e-sign consent")
     problems += _identity_problems(stored)
     if stored.income_verification is None:
-        problems.append("the income has not been verified")
+        if _employment_status(stored) == "other":
+            problems.append(
+                'the income cannot be verified: no document counts for the employment status "other"'
+            )
+        else:
+            problems.append("the income has not been verified")
     elif not stored.income_verification_is_current():
         problems.append(
             "the income verification is out of date (the document or the form changed)"

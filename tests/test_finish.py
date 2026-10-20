@@ -281,3 +281,11 @@ def test_last_contact():
     replied = case.info.start_time + timedelta(days=3)
     store.record_reply(app_id, CustomerReply(received_at=replied))
     assert last_contact(stored) == replied
+
+
+def test_complete_refused_for_other_employment_says_why():
+    store, app_id, case = submitted("04_retiree_other_employment")
+    verify_identity(store, app_id, case.info.start_time)
+    assert problems(end(store, app_id, case)) == [
+        'the income cannot be verified: no document counts for the employment status "other"'
+    ]
