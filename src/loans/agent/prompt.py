@@ -6,9 +6,10 @@ the code enforces. The rules themselves are enforced in code (checks/ and the
 tools); the prompt tells the agent about them so it can plan and explain them
 to the customer, not so it can be trusted to follow them.
 
-PROMPT_VERSION is a short fingerprint of the text, recorded with every agent
-event in the audit log, so a change in behavior can be traced to a change in
-the instructions.
+PROMPT_VERSION is a short fingerprint of the text (the system prompt and the
+wording of the messages that start and resume a case), recorded with every
+agent event in the audit log, so a change in behavior can be traced to a
+change in the instructions.
 """
 
 import hashlib
@@ -27,7 +28,7 @@ take one submitted loan application to a complete state (see Ending the case)
 so it can go on to the credit check, or to end it properly when that is not
 possible. You do not decide whether the loan is approved, and you never suggest
 that it will be. The application (the form, the uploaded documents and the ID)
-is already in the bank's system.
+is already in the bank's system, and you see it only through your tools.
 
 # The bank's requirements
 
@@ -147,7 +148,6 @@ human (suspected_manipulation).
 
 
 SYSTEM_PROMPT = build_system_prompt()
-PROMPT_VERSION = hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest()[:8]
 
 
 def _today(today: date) -> str:
@@ -161,8 +161,9 @@ def first_turn(first_message: str | None, today: date) -> str:
     """The message that starts a case, with today's date and the customer's
     own first message quoted as untrusted text."""
     text = (
-        f"{_today(today)} A new loan application has been submitted and is in the "
-        "system: the form, the uploaded documents and the ID. Process it."
+        f"{_today(today)} A new loan application has been submitted. You can see it "
+        "only through your tools: the form, the uploaded documents and the ID. Work "
+        "on it until you can end the case."
     )
     if first_message:
         message = quote(first_message, MAX_QUOTED_MESSAGE_LENGTH)
@@ -197,3 +198,20 @@ def no_answer_turn(days: int, today: date) -> str:
         f"{_today(today)} {days} days have passed since the last message or reply, "
         "with no answer from the customer."
     )
+
+
+def _fingerprint() -> str:
+    """A short fingerprint of everything the agent is told: the system prompt
+    and the fixed wording of the messages that start and resume a case
+    (rendered with sample values, since only their wording is fixed)."""
+    day = date(2000, 1, 1)
+    texts = [
+        SYSTEM_PROMPT,
+        first_turn("sample", day),
+        customer_reply_turn(1, "sample", ["pay_stub"], ["phone"], day),
+        no_answer_turn(policy.NO_ANSWER_CANCEL_DAYS, day),
+    ]
+    return hashlib.sha256("\n\n".join(texts).encode()).hexdigest()[:8]
+
+
+PROMPT_VERSION = _fingerprint()
