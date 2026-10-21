@@ -1,12 +1,14 @@
 """Tests for the run script's --show output."""
 
 import json
+import os
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from loans.evals.case import load_case, submit_case
 from loans.evals.simulate import simulate_case
+from loans import run
 from loans.run import LivePrinter, conversation, format_message, write_conversation
 from loans.store import ApplicationStore
 
@@ -106,3 +108,52 @@ def test_conversation_without_any_messages():
     case = load_case(CASES / "01_clean_application")
     stored = store.get(submit_case(store, case))
     assert conversation(case, stored) == []
+
+
+def fake_keyring(monkeypatch, secrets):
+    looked_up = []
+
+    def lookup(service, account):
+        looked_up.append(service)
+        return secrets.get(service)
+
+    monkeypatch.setattr(run, "keyring_lookup", lookup)
+    return looked_up
+
+
+def test_keys_come_from_the_keyring(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    fake_keyring(monkeypatch, {"langsmith": "ls-key"})
+    run.load_keys("ollama:qwen3:4b")
+    assert os.environ["LANGSMITH_API_KEY"] == "ls-key"
+    assert os.environ["LANGSMITH_TRACING"] == "true"
+
+
+def test_only_the_needed_keys_are_looked_up(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    looked_up = fake_keyring(monkeypatch, {"anthropic": "a-key", "langsmith": "ls-key"})
+    run.load_keys("ollama:qwen3:4b")
+    assert looked_up == []  # no tracing, no Anthropic model: no keys at all
+    run.load_keys("anthropic:claude-sonnet-5-5")
+    assert looked_up == ["anthropic"]
+    assert os.environ["ANTHROPIC_API_KEY"] == "a-key"
+
+
+def test_without_a_langsmith_key_tracing_is_turned_off(monkeypatch, capsys):
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    fake_keyring(monkeypatch, {})
+    run.load_keys("ollama:qwen3:4b")
+    assert os.environ["LANGSMITH_TRACING"] == "false"
+    assert "tracing is off" in capsys.readouterr().out
+
+
+def test_a_key_already_set_is_kept(monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "from-the-shell")
+    looked_up = fake_keyring(monkeypatch, {"langsmith": "from-the-keyring"})
+    run.load_keys("ollama:qwen3:4b")
+    assert os.environ["LANGSMITH_API_KEY"] == "from-the-shell"
+    assert looked_up == []

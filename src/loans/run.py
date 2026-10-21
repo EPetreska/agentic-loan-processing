@@ -22,7 +22,8 @@ case inside:
 The conversation is kept so it can be reviewed and checked by the evals; the
 audit log itself keeps no message text.
 
-Settings come from .env (see .env.example): LLM_MODEL chooses the model
+Settings come from .env (see .env.example), API keys from the system keyring
+(see KEYRING below): LLM_MODEL chooses the model
 (--model overrides it for one run, handy for comparing models), and the
 LANGSMITH_* settings turn on tracing; LangGraph sends the traces by
 itself. Time is simulated: the clock starts at the case's start time and moves
@@ -40,6 +41,7 @@ clock change.
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +59,50 @@ from loans.store import ApplicationStore, StoredApplication
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "evals" / "cases"
 RUNS = ROOT / "runs"
+
+# API keys are kept in the system keyring (GNOME keyring, read with
+# secret-tool), never in .env or any file in the project. Each run looks up
+# only the keys it needs and puts them in the environment for that run.
+# Store a key once with, for example:
+#     secret-tool store --label="LangSmith API key" service langsmith account apikey
+KEYRING = {
+    "LANGSMITH_API_KEY": ("langsmith", "apikey"),
+    "ANTHROPIC_API_KEY": ("anthropic", "apikey"),
+}
+
+
+def keyring_lookup(service: str, account: str) -> str | None:
+    """A secret from the system keyring, or None if it is not there."""
+    try:
+        found = subprocess.run(
+            ["secret-tool", "lookup", "service", service, "account", account],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return found.stdout.strip() or None
+
+
+def load_keys(model_spec: str) -> None:
+    """Put the keys this run needs into the environment, from the keyring
+    unless already set: the LangSmith key if tracing is on, and the Anthropic
+    key if the model is an Anthropic model. Without a LangSmith key, tracing
+    is turned off for the run, with a notice."""
+    needed = []
+    if os.environ.get("LANGSMITH_TRACING", "").lower() == "true":
+        needed.append("LANGSMITH_API_KEY")
+    if model_spec.startswith("anthropic:"):
+        needed.append("ANTHROPIC_API_KEY")
+    for name in needed:
+        if not os.environ.get(name):
+            secret = keyring_lookup(*KEYRING[name])
+            if secret:
+                os.environ[name] = secret
+    if "LANGSMITH_API_KEY" in needed and not os.environ.get("LANGSMITH_API_KEY"):
+        os.environ["LANGSMITH_TRACING"] = "false"
+        print("note: no LangSmith key in the keyring, so tracing is off for this run")
 
 # A limit on the number of loop steps, against an agent that never stops.
 MAX_STEPS = 60
@@ -169,6 +215,7 @@ def main(argv: list[str] | None = None) -> None:
     if not model_spec:
         sys.exit("no model: use --model or set LLM_MODEL (see .env.example)")
 
+    load_keys(model_spec)
     model = make_model(model_spec)  # first, so a wrong setting fails before anything is logged
     case = load_case(CASES / args.case)
     run_dir = RUNS / datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
