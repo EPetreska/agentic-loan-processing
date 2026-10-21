@@ -40,10 +40,9 @@ TAX_RETURN_MAX_YEARS_OLD = 1
 # claimed income. Exactly 5% counts as within.
 INCOME_TOLERANCE = Decimal("0.05")
 
-# Loan offers. After the credit check, the bank offers the amount the
-# customer asked for at the term they asked for and at the next shorter and
-# the next longer term (src/loans/offers.py). The yearly rate for each term
-# the form allows: illustrative rates for a borrower with good credit,
+# Loan offers. After the credit check, the bank offers the amount and the
+# term the customer asked for (src/loans/offers.py). The yearly rate for each
+# term the form allows: illustrative rates for a borrower with good credit,
 # slightly higher for longer terms, as at real lenders. There are no fees, so
 # the APR equals the rate.
 OFFER_RATES = {

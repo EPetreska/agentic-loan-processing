@@ -151,8 +151,8 @@ class StoredApplication(BaseModel):
     ending: CaseEnding | None = None
     # The credit check, run by the bank's workflow after a complete ending.
     credit_check: CreditCheckResult | None = None
-    # The offers created after a passed credit check, shortest term first:
-    # the whole allowed space for the offer agent.
+    # The offers made to the customer, oldest first: the one created after a
+    # passed credit check, then any revised offer a loan officer approved.
     offers: list[Offer] = []
     # Everything that happened in the case, oldest first. Only ever added to.
     audit_log: list[AuditEvent] = []
@@ -337,13 +337,14 @@ class ApplicationStore:
                 "passed" if result.passed else "not passed",
             )
 
-    def record_offers(self, application_id: str, offers: list[Offer], now: datetime) -> None:
-        """Keep the created offers on file and log them, in one step. The log
-        names the terms only."""
+    def record_offer(self, application_id: str, offer: Offer, now: datetime) -> None:
+        """Keep a new offer on file and log it, in one step. The log names
+        the term only."""
         with self._changing(application_id) as stored:
-            stored.offers = offers
-            terms = ", ".join(str(offer.term_months) for offer in offers)
-            self.log_event(application_id, now, "system", "offers_created", f"{terms} months")
+            stored.offers.append(offer)
+            self.log_event(
+                application_id, now, "system", "offer_created", f"{offer.term_months} months"
+            )
 
     def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example

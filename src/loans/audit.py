@@ -46,7 +46,7 @@ EventName = Literal[
     "action_blocked",
     # the bank's workflow, after the agent
     "credit_checked",
-    "offers_created",
+    "offer_created",
 ]
 
 

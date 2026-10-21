@@ -1,5 +1,5 @@
-"""Tests for the offers: the terms, the loan math, and the workflow creating
-them only after a passed credit check."""
+"""Tests for the offer: the loan math, and the workflow creating it only
+after a passed credit check."""
 
 import asyncio
 from decimal import Decimal
@@ -10,7 +10,7 @@ import pytest
 from loans import policy
 from loans.evals.case import load_case, submit_case
 from loans.evals.simulate import simulate_case
-from loans.offers import create_offers, monthly_payment, offer_terms, offers_for
+from loans.offers import create_offer, monthly_payment, offer_for
 from loans.schemas.application import ALLOWED_TERMS
 from loans.store import ApplicationStore
 from test_simulate import MARIA, FakeModel, ask, step, wait
@@ -18,28 +18,21 @@ from test_simulate import MARIA, FakeModel, ask, step, wait
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 
 
-def test_maria_gets_three_offers_with_the_right_numbers():
-    # $15,000 asked over 48 months. Values from the standard loan formula.
-    offers = create_offers(Decimal("15000"), 48)
-    rows = [
-        (o.term_months, o.apr, o.monthly_payment, o.total_of_payments, o.finance_charge)
-        for o in offers
-    ]
-    assert rows == [
-        (36, Decimal("0.0999"), Decimal("483.94"), Decimal("17421.84"), Decimal("2421.84")),
-        (48, Decimal("0.1099"), Decimal("387.61"), Decimal("18605.28"), Decimal("3605.28")),
-        (60, Decimal("0.1199"), Decimal("333.59"), Decimal("20015.40"), Decimal("5015.40")),
-    ]
-    assert all(o.amount == Decimal("15000") for o in offers)
-
-
 @pytest.mark.parametrize(
-    "asked, terms",
-    [(12, [12, 24, 36]), (24, [12, 24, 36]), (36, [24, 36, 48]), (48, [36, 48, 60]), (60, [36, 48, 60])],
+    "months, apr, payment, total, interest",
+    [
+        (36, "0.0999", "483.94", "17421.84", "2421.84"),
+        (48, "0.1099", "387.61", "18605.28", "3605.28"),
+        (60, "0.1199", "333.59", "20015.40", "5015.40"),
+    ],
 )
-def test_the_asked_for_term_and_its_neighbors(asked, terms):
-    assert offer_terms(asked) == terms
-    assert asked in terms
+def test_the_numbers_for_15000(months, apr, payment, total, interest):
+    # Values from the standard loan formula.
+    offer = create_offer(Decimal("15000"), months)
+    assert offer.amount == Decimal("15000")
+    assert (offer.apr, offer.monthly_payment, offer.total_of_payments, offer.finance_charge) == (
+        Decimal(apr), Decimal(payment), Decimal(total), Decimal(interest)
+    )
 
 
 def test_every_allowed_term_has_a_rate():
@@ -47,7 +40,7 @@ def test_every_allowed_term_has_a_rate():
 
 
 def test_a_longer_term_costs_more_in_total_but_less_a_month():
-    offers = create_offers(Decimal("15000"), 48)
+    offers = [create_offer(Decimal("15000"), months) for months in sorted(ALLOWED_TERMS)]
     payments = [o.monthly_payment for o in offers]
     totals = [o.total_of_payments for o in offers]
     assert payments == sorted(payments, reverse=True)
@@ -65,9 +58,10 @@ def test_the_payments_pay_off_the_loan():
     assert abs(balance) < Decimal("0.01") * months
 
 
-def test_offers_come_from_the_form():
-    case = load_case(CASES / "02_maria_job_change")
-    assert [o.term_months for o in offers_for(case.application)] == [36, 48, 60]
+def test_the_offer_is_what_the_customer_asked_for():
+    case = load_case(CASES / "02_maria_job_change")  # $15,000 over 48 months
+    offer = offer_for(case.application)
+    assert (offer.amount, offer.term_months) == (Decimal("15000"), 48)
 
 
 def simulate(case_name, answers):
@@ -77,24 +71,26 @@ def simulate(case_name, answers):
     return store.get(result.application_id)
 
 
-def test_a_complete_case_gets_its_offers():
+def test_a_complete_case_gets_its_offer():
     stored = simulate("02_maria_job_change", MARIA)
-    assert [o.term_months for o in stored.offers] == [36, 48, 60]
+    assert [o.term_months for o in stored.offers] == [48]
     event = stored.audit_log[-1]
-    assert (event.actor, event.event, event.details) == ("system", "offers_created", "36, 48, 60 months")
+    assert (event.actor, event.event, event.details) == ("system", "offer_created", "48 months")
     assert event.at > stored.credit_check.checked_at
 
 
-def test_other_endings_get_no_offers():
+def test_other_endings_get_no_offer():
     no_answer = {"outcome": "cancelled", "reason": "no_answer", "explanation": "No reply."}
     stored = simulate("03_no_answer", [ask(), wait(), step("finish", no_answer)])
     assert stored.offers == []
-    assert "offers_created" not in [e.event for e in stored.audit_log]
+    assert "offer_created" not in [e.event for e in stored.audit_log]
 
 
 def test_offers_are_kept_on_file_in_postgres(pg_store):
     case = load_case(CASES / "02_maria_job_change")
     app_id = submit_case(pg_store, case)
-    offers = offers_for(case.application)
-    pg_store.record_offers(app_id, offers, case.info.start_time)
-    assert pg_store.get(app_id).offers == offers
+    first = offer_for(case.application)
+    revised = create_offer(Decimal("17000"), 48)  # as after an officer's approval
+    pg_store.record_offer(app_id, first, case.info.start_time)
+    pg_store.record_offer(app_id, revised, case.info.start_time)
+    assert pg_store.get(app_id).offers == [first, revised]
