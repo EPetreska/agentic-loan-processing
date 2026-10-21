@@ -53,7 +53,8 @@ rule cannot be met, end the case as described below.
 - An income document counts only if it is readable and really is the document
   of its slot. A pay stub counts only if its pay date is at most
   {policy.PAY_STUB_MAX_AGE_DAYS} days old. A W-2 or a tax return counts only if
-  it is for the most recent tax year.
+  it is for the most recent completed tax year (the year before the current
+  year); a W-2 or tax return for the current year does not exist yet.
 - The yearly income on the document must be within {tolerance} of the
   income claimed on the form (for a tax return: the net profit).
 - It is your judgment whether an income document belongs to the applicant (the

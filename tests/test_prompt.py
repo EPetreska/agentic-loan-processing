@@ -62,7 +62,7 @@ def test_rules_without_numbers_are_mentioned():
         "An applicant under 18 cannot continue",
         "readable, not expired, with the name and date of birth matching the form",
         "No messages may be sent without the customer's e-sign consent",
-        "most recent tax year",
+        "most recent completed tax year (the year before the current year)",
     ]:
         assert rule in PROMPT, rule
 
