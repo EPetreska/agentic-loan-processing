@@ -52,3 +52,21 @@ OFFER_RATES = {
     48: Decimal("0.1099"),
     60: Decimal("0.1199"),
 }
+
+# The loan's terms, as the bank states them to customers in its terms and
+# FAQ document (src/loans/rag/bank_terms.py), which the offer agent searches.
+
+# A payment counts as late if it has not been received this many days after
+# its due date; the late fee is then charged once for that payment.
+LATE_PAYMENT_GRACE_DAYS = 15
+LATE_FEE = Decimal("25")
+
+# Paying the loan off early, in part or in full, costs nothing extra.
+PREPAYMENT_PENALTY = Decimal("0")
+
+# The customer may move the monthly due date at most this many times in any
+# 12 months.
+DUE_DATE_CHANGES_PER_YEAR = 1
+
+# An offer can be accepted (e-signed) for this many days after it was sent.
+OFFER_VALID_DAYS = 30
