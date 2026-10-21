@@ -17,18 +17,33 @@ The store needs a connection in autocommit mode (see connect), so that each
 change is its own transaction and a read never leaves one open.
 """
 
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg
+from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from loans.audit import AgentVersion, AuditEvent
+from loans.keyring import POSTGRES_PASSWORD, keyring_lookup
 from loans.store import ApplicationStore, StoredApplication, UnknownApplication
 
 SCHEMA = Path(__file__).with_name("schema.sql")
+
+# The database docker compose starts (see docker-compose.yml).
+DEFAULT_DATABASE_URL = "postgresql://loans@localhost:5432/loans"
+
+
+def database_conninfo(**overrides) -> str:
+    """The database's address from DATABASE_URL (see .env.example), with the
+    password from the keyring (or PGPASSWORD, if set). overrides change parts
+    of it, for example dbname="loans_test"."""
+    url = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+    password = os.environ.get("PGPASSWORD") or keyring_lookup(*POSTGRES_PASSWORD)
+    return make_conninfo(url, password=password, **overrides)
 
 
 def connect(conninfo: str, **kwargs) -> psycopg.Connection:

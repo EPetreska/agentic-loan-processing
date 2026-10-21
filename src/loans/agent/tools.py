@@ -7,8 +7,9 @@ of the parameters the LLM sees: the LLM chooses only the slot, the text, the
 reason, the outcome and the explanation. The LLM is never given the
 application ID, so text in a prompt cannot point a tool at another case.
 
-The descriptions here are what the LLM reads about each tool; the plain tools
-keep their own docstrings for developers.
+What the LLM reads about each tool comes from loans.tools.descriptions, shared
+with the MCP server (loans.mcp.server), which offers the same tools across the
+network.
 """
 
 from collections.abc import Callable
@@ -18,13 +19,13 @@ from typing import Annotated
 from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 
 from loans.schemas.documents import IncomeSlot
+from loans.tools import descriptions
 from loans.schemas.outcome import OutcomeKind, Reason
 from loans.store import ApplicationStore
 from loans.tools.check_application import check_application as _check_application
 from loans.tools.finish import finish as _finish
 from loans.tools.mark_income_verified import mark_income_verified as _mark_income_verified
 from loans.tools.read_document import read_document as _read_document
-from loans.tools.send_message import MAX_MESSAGE_LENGTH
 from loans.tools.send_message import send_message as _send_message
 from loans.tools.verify_identity import verify_identity as _verify_identity
 
@@ -37,82 +38,45 @@ def make_tools(
     """The tools for one case. clock gives the current (possibly simulated)
     time at each call."""
 
-    @tool
+    @tool(description=descriptions.CHECK_APPLICATION)
     def check_application() -> str:
-        """Check that the application form is filled in correctly. Returns one
-        line per field: ok, error or warning. It checks the form only: it does
-        not compare the ID with the form or read the income documents. For fields such as the name, employer,
-        income and loan, it also shows the customer's value: the checked
-        value when ok (free text in quotes), and exactly what was typed, in
-        quotes, when there is an error. Sensitive fields such as the SSN and
-        the date of birth show only the result."""
         return _check_application(store, application_id, clock())
 
-    @tool
+    @tool(description=descriptions.READ_DOCUMENT)
     def read_document(slot: IncomeSlot) -> str:
-        """Read an uploaded income document. Returns two parts. First,
-        "extraction findings:", what the extraction service read, one
-        "name: value" line each for: what the file really is (document_type)
-        and whether it matches the slot it was uploaded in (matches_slot);
-        whether it could be read (readable); the fields on the document, with
-        text from the document in quotes; values calculated in code, marked
-        "(calculated)", such as the yearly income and the pay stub's age; and
-        any other text found on the document, in quotes. Then the bank's own
-        check: "bank income rules: met", or "not met" with one line per rule
-        that is not met."""
         return _read_document(store, application_id, slot, clock())
 
-    @tool
+    @tool(description=descriptions.VERIFY_IDENTITY)
     def verify_identity() -> str:
-        """Compare the uploaded ID with the form. Returns one line per
-        finding: yes, no, or "cannot check" with the reason. The findings are
-        facts, not a decision. A "no" never says how the values differ,
-        because personal data is never shown. After a new ID upload or a form
-        correction, verify again: earlier findings are then out of date."""
         return _verify_identity(store, application_id, clock())
 
-    @tool
+    @tool(description=descriptions.MARK_INCOME_VERIFIED)
     def mark_income_verified(
         slot: IncomeSlot,
-        reason: Annotated[str, "Why this document verifies the claimed income."],
+        reason: Annotated[str, descriptions.INCOME_REASON],
         call_id: CallId,
     ) -> str:
-        """Record that the document in this slot verifies the claimed income.
-        Refused if a bank income rule is not met. After a new upload of this
-        document or a form correction, mark it again: the earlier
-        verification is then out of date."""
         return _mark_income_verified(
             store, application_id, clock(), call_id, slot, reason
         )
 
-    # The description is built from MAX_MESSAGE_LENGTH, so it cannot drift
-    # from the real limit; a docstring cannot hold a variable.
-    @tool(
-        description=(
-            "Send a message to the customer. Refused if the customer has not "
-            "given e-sign consent, if the text is empty or longer than "
-            f"{MAX_MESSAGE_LENGTH} characters, or without a reason."
-        )
-    )
+    @tool(description=descriptions.SEND_MESSAGE)
     def send_message(
-        text: Annotated[str, "The message to the customer."],
-        reason: Annotated[str, "Why you are sending it, in a short sentence."],
+        text: Annotated[str, descriptions.MESSAGE_TEXT],
+        reason: Annotated[str, descriptions.MESSAGE_REASON],
         call_id: CallId,
     ) -> str:
         return _send_message(
             store, application_id, clock(), call_id, text, reason
         )
 
-    @tool
+    @tool(description=descriptions.FINISH)
     def finish(
         outcome: OutcomeKind,
         reason: Reason,
-        explanation: Annotated[str, "A short explanation for whoever takes the case next."],
+        explanation: Annotated[str, descriptions.EXPLANATION],
         call_id: CallId,
     ) -> str:
-        """End the case with an outcome, a reason that fits it, and an
-        explanation. Refused if the bank's rules do not allow this ending,
-        listing every problem. A case ends only once."""
         return _finish(
             store, application_id, clock(), call_id, outcome, reason, explanation
         )

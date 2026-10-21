@@ -23,7 +23,7 @@ The conversation is kept so it can be reviewed and checked by the evals; the
 audit log itself keeps no message text.
 
 Settings come from .env (see .env.example), API keys from the system keyring
-(see KEYRING below): LLM_MODEL chooses the model
+(see loans.keyring): LLM_MODEL chooses the model
 (--model overrides it for one run, handy for comparing models), and the
 LANGSMITH_* settings turn on tracing; LangGraph sends the traces by
 itself. Time is simulated: the clock starts at the case's start time and moves
@@ -41,7 +41,6 @@ clock change.
 import argparse
 import json
 import os
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,35 +53,12 @@ from loans.agent.prompt import PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log
 from loans.evals.case import EvalCase, load_case
 from loans.evals.simulate import simulate_case
+from loans.keyring import API_KEYS, keyring_lookup
 from loans.store import ApplicationStore, StoredApplication
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "evals" / "cases"
 RUNS = ROOT / "runs"
-
-# API keys are kept in the system keyring (GNOME keyring, read with
-# secret-tool), never in .env or any file in the project. Each run looks up
-# only the keys it needs and puts them in the environment for that run.
-# Store a key once with, for example:
-#     secret-tool store --label="LangSmith API key" service langsmith account apikey
-KEYRING = {
-    "LANGSMITH_API_KEY": ("langsmith", "apikey"),
-    "ANTHROPIC_API_KEY": ("anthropic", "apikey"),
-}
-
-
-def keyring_lookup(service: str, account: str) -> str | None:
-    """A secret from the system keyring, or None if it is not there."""
-    try:
-        found = subprocess.run(
-            ["secret-tool", "lookup", "service", service, "account", account],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    return found.stdout.strip() or None
 
 
 def load_keys(model_spec: str) -> None:
@@ -97,7 +73,7 @@ def load_keys(model_spec: str) -> None:
         needed.append("ANTHROPIC_API_KEY")
     for name in needed:
         if not os.environ.get(name):
-            secret = keyring_lookup(*KEYRING[name])
+            secret = keyring_lookup(*API_KEYS[name])
             if secret:
                 os.environ[name] = secret
     if "LANGSMITH_API_KEY" in needed and not os.environ.get("LANGSMITH_API_KEY"):
