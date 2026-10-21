@@ -62,3 +62,29 @@ CREATE TABLE IF NOT EXISTS case_sessions (
 -- at the same time.
 CREATE UNIQUE INDEX IF NOT EXISTS case_sessions_one_open
     ON case_sessions (application_id) WHERE closed_at IS NULL;
+
+-- The offer agent's RAG: the chunks of the bank's terms and the CFPB answers,
+-- with their embeddings, searched by meaning (see loans.rag.index). pgvector
+-- adds the vector type, the cosine distance (<=>) and the HNSW index.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS rag_chunks (
+    chunk_id text PRIMARY KEY,
+    -- "bank" (the bank's terms) or "cfpb".
+    document text NOT NULL,
+    title text NOT NULL,
+    text text NOT NULL,
+    -- Where the chunk comes from, for the agent to name.
+    source text NOT NULL,
+    embedding vector(768) NOT NULL,
+    -- The model that made the embedding: a question must be embedded by the
+    -- same model, or the search compares numbers that do not match.
+    embedding_model text NOT NULL,
+    indexed_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- HNSW, pgvector's standard index for fast nearest-neighbour search, by
+-- cosine distance. With about a hundred chunks an exact search would be just
+-- as fast; the index is what a real collection of documents needs.
+CREATE INDEX IF NOT EXISTS rag_chunks_embedding
+    ON rag_chunks USING hnsw (embedding vector_cosine_ops);

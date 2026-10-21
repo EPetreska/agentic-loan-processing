@@ -50,7 +50,7 @@ def pg_conninfo() -> str:
 def pg_conn(pg_conninfo):
     """A connection to the test database, with empty tables."""
     with connect(pg_conninfo) as conn:
-        conn.execute("DROP TABLE IF EXISTS case_sessions, audit_events, applications")
+        conn.execute("DROP TABLE IF EXISTS rag_chunks, case_sessions, audit_events, applications")
         create_tables(conn)
         yield conn
 

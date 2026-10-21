@@ -1,5 +1,6 @@
 # The services the project runs on. For now only Postgres, the bank's
-# application database; later the MCP server joins it here.
+# application database (with pgvector, which also lets it search the offer
+# agent's documents by meaning); later the MCP server joins it here.
 #
 # Start (the first start sets the password, taken from the keyring):
 #     POSTGRES_PASSWORD="$(secret-tool lookup service loans-postgres account postgres)" docker compose up -d
@@ -11,7 +12,8 @@
 
 services:
   postgres:
-    image: postgres:17
+    # Postgres 17 with the pgvector extension included.
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: loans
       POSTGRES_DB: loans
