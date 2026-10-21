@@ -49,6 +49,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import Field
 
 from loans.db.postgres_store import PostgresStore, create_tables, database_conninfo
+from loans.mcp import CALL_ID_KEY
 from loans.mcp.sessions import InvalidToken, SessionClock, find_session
 from loans.schemas.documents import IncomeSlot
 from loans.schemas.outcome import OutcomeKind, Reason
@@ -62,10 +63,6 @@ from loans.tools.verify_identity import verify_identity as _verify_identity
 
 HOST = "127.0.0.1"
 PORT = 8000
-
-# The _meta key that carries the LLM's tool call ID. Custom _meta keys carry
-# a prefix, as MCP asks, so they cannot clash with the protocol's own.
-CALL_ID_KEY = "loans/call_id"
 
 NOT_ALLOWED = "not allowed: unknown or closed session"
 

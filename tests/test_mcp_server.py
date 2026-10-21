@@ -1,18 +1,12 @@
 """Tests for the MCP server, called over real HTTP as the agent will call it.
 They need Postgres running (docker compose up -d) and are skipped without it."""
 
-import socket
-import threading
-import time
-from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
 import httpx2
 import pytest
-import uvicorn
 from mcp import ClientSession
-from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
@@ -20,13 +14,15 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.shared.exceptions import MCPError
 from psycopg_pool import ConnectionPool
 
-from loans.audit import AgentVersion
 from loans.evals.case import load_case, submit_case
 from loans.evals.simulate import SimulatedClock
-from loans.mcp.server import CALL_ID_KEY, NOT_ALLOWED, create_server
+from loans.mcp import CALL_ID_KEY
+from loans.mcp.client import connect as connected
+from loans.mcp.server import NOT_ALLOWED, create_server
 from loans.mcp.sessions import SessionClock, close_session, open_session
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore
+from conftest import AGENT
 from loans.tools import descriptions
 from loans.tools.check_application import check_application
 from loans.tools.finish import finish
@@ -36,54 +32,10 @@ from loans.tools.send_message import send_message
 from loans.tools.verify_identity import verify_identity
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
-AGENT = AgentVersion(model="ollama:qwen3:4b", prompt_version="v1")
 PDF = RawFile(filename="stub.pdf", content_type="application/pdf")
 MESSAGE = "Please upload a newer pay stub."
 
 pytestmark = pytest.mark.anyio
-
-
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def server_url(pg_conninfo):
-    """The server, running on the test database in a background thread, as
-    it would run on its own."""
-    port = free_port()
-    url = f"http://127.0.0.1:{port}"
-    with ConnectionPool(pg_conninfo, kwargs={"autocommit": True}, min_size=1, max_size=5) as pool:
-        app = create_server(pool, url).streamable_http_app(
-            stateless_http=True, json_response=True, host="127.0.0.1"
-        )
-        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-        thread = threading.Thread(target=server.run, daemon=True)
-        thread.start()
-        while not server.started:
-            time.sleep(0.01)
-        yield f"{url}/mcp"
-        server.should_exit = True
-        thread.join(5)
-
-
-@asynccontextmanager
-async def connected(url: str, token: str | None):
-    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
-    async with (
-        create_mcp_http_client(headers=headers) as http,
-        streamable_http_client(url, http_client=http) as (read, write),
-        ClientSession(read, write) as session,
-    ):
-        await session.initialize()
-        yield session
 
 
 async def call(session: ClientSession, tool: str, args: dict | None = None, call_id: str | None = None):
@@ -107,17 +59,9 @@ def status_without_valid_token(url: str, token: str | None) -> int:
     return httpx2.post(url, json=body, headers=headers).status_code
 
 
-@pytest.fixture
-def maria(pg_store, pg_conn):
-    """Maria's case, submitted, with an open session: (case, ID, token)."""
-    case = load_case(CASES / "02_maria_job_change")
-    app_id = submit_case(pg_store, case)
-    return case, app_id, open_session(pg_conn, app_id, case.info.start_time, AGENT)
-
-
-async def test_the_six_tools_as_the_llm_will_see_them(server_url, maria):
+async def test_the_six_tools_as_the_llm_will_see_them(mcp_url, maria):
     _, _, token = maria
-    async with connected(server_url, token) as session:
+    async with connected(mcp_url, token) as session:
         tools = {t.name: t for t in (await session.list_tools()).tools}
     assert sorted(tools) == sorted(
         ["check_application", "read_document", "verify_identity",
@@ -131,7 +75,7 @@ async def test_the_six_tools_as_the_llm_will_see_them(server_url, maria):
         assert not params & {"application_id", "call_id", "ctx", "token"}, tool.name
 
 
-async def test_maria_through_mcp_matches_the_direct_tools(server_url, maria, pg_store, pg_conn):
+async def test_maria_through_mcp_matches_the_direct_tools(mcp_url, maria, pg_store, pg_conn):
     case, app_id, token = maria
     start = case.info.start_time
     later = start + timedelta(days=2)
@@ -157,7 +101,7 @@ async def test_maria_through_mcp_matches_the_direct_tools(server_url, maria, pg_
 
     # The same steps through the server; the customer's upload goes straight
     # to the database, as the bank's portal would.
-    async with connected(server_url, token) as session:
+    async with connected(mcp_url, token) as session:
         texts = [
             await call(session, "check_application"),
             await call(session, "read_document", {"slot": "pay_stub"}),
@@ -176,9 +120,9 @@ async def test_maria_through_mcp_matches_the_direct_tools(server_url, maria, pg_
     assert pg_store.get(app_id) == memory.get(app_id)
 
 
-async def test_agent_events_carry_the_model_and_prompt_version(server_url, maria, pg_store):
+async def test_agent_events_carry_the_model_and_prompt_version(mcp_url, maria, pg_store):
     _, app_id, token = maria
-    async with connected(server_url, token) as session:
+    async with connected(mcp_url, token) as session:
         await call(session, "check_application")
     event = pg_store.get(app_id).audit_log[-1]
     assert (event.actor, event.model, event.prompt_version) == ("agent", AGENT.model, AGENT.prompt_version)
@@ -186,30 +130,30 @@ async def test_agent_events_carry_the_model_and_prompt_version(server_url, maria
 
 # None: no token at all. The case ID: a caller that knows which case it wants.
 @pytest.mark.parametrize("token", [None, "made-up-token", "02_maria_job_change"])
-def test_a_missing_or_wrong_token_is_refused(server_url, maria, pg_store, token):
+def test_a_missing_or_wrong_token_is_refused(mcp_url, maria, pg_store, token):
     _, app_id, _ = maria
     before = pg_store.get(app_id)
-    assert status_without_valid_token(server_url, token) == 401
+    assert status_without_valid_token(mcp_url, token) == 401
     assert pg_store.get(app_id) == before  # nothing read, nothing stored
 
 
-def test_a_closed_session_is_refused(server_url, maria, pg_store, pg_conn):
+def test_a_closed_session_is_refused(mcp_url, maria, pg_store, pg_conn):
     _, app_id, token = maria
     close_session(pg_conn, token)
     before = pg_store.get(app_id)
-    assert status_without_valid_token(server_url, token) == 401
+    assert status_without_valid_token(mcp_url, token) == 401
     assert pg_store.get(app_id) == before
 
 
-async def test_the_client_cannot_even_connect_without_a_token(server_url, maria):
+async def test_the_client_cannot_even_connect_without_a_token(mcp_url, maria):
     with pytest.RaisesGroup(MCPError, flatten_subgroups=True):
-        async with connected(server_url, "made-up-token"):
+        async with connected(mcp_url, "made-up-token"):
             pass
 
 
-async def test_a_session_closed_during_a_connection_is_refused(server_url, maria, pg_store, pg_conn):
+async def test_a_session_closed_during_a_connection_is_refused(mcp_url, maria, pg_store, pg_conn):
     _, app_id, token = maria
-    async with connected(server_url, token) as session:
+    async with connected(mcp_url, token) as session:
         assert not (await call(session, "check_application"))[1]
         close_session(pg_conn, token)
         before = pg_store.get(app_id)
@@ -218,13 +162,13 @@ async def test_a_session_closed_during_a_connection_is_refused(server_url, maria
     assert pg_store.get(app_id) == before
 
 
-async def test_a_token_reaches_only_its_own_case(server_url, maria, pg_store, pg_conn):
+async def test_a_token_reaches_only_its_own_case(mcp_url, maria, pg_store, pg_conn):
     _, maria_id, maria_token = maria
     daniel = load_case(CASES / "01_clean_application")
     daniel_id = submit_case(pg_store, daniel)
     open_session(pg_conn, daniel_id, daniel.info.start_time, AGENT)
     daniel_before = pg_store.get(daniel_id)
-    async with connected(server_url, maria_token) as session:
+    async with connected(mcp_url, maria_token) as session:
         text, _ = await call(session, "check_application")
         # Naming Daniel's case in the arguments changes nothing.
         await call(session, "check_application", {"application_id": daniel_id})
@@ -233,20 +177,20 @@ async def test_a_token_reaches_only_its_own_case(server_url, maria, pg_store, pg
     assert len(pg_store.get(maria_id).audit_log) > 1
 
 
-async def test_a_retried_message_is_sent_once(server_url, maria, pg_store):
+async def test_a_retried_message_is_sent_once(mcp_url, maria, pg_store):
     _, app_id, token = maria
     args = {"text": MESSAGE, "reason": "Pay stub too old."}
-    async with connected(server_url, token) as session:
+    async with connected(mcp_url, token) as session:
         first = await call(session, "send_message", args, "c1")
         retry = await call(session, "send_message", args, "c1")
     assert first == retry == ("message sent (message 1 in this case)", False)
     assert len(pg_store.get(app_id).messages) == 1
 
 
-async def test_a_call_without_a_call_id_is_refused(server_url, maria, pg_store, pg_conn):
+async def test_a_call_without_a_call_id_is_refused(mcp_url, maria, pg_store, pg_conn):
     case, app_id, token = maria
     args = {"text": MESSAGE, "reason": "Pay stub too old."}
-    async with connected(server_url, token) as session:
+    async with connected(mcp_url, token) as session:
         text, is_error = await call(session, "send_message", args)
     assert is_error and "no call ID" in text
     assert pg_store.get(app_id).messages == []
