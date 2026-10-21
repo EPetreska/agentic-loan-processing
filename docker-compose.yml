@@ -1,0 +1,31 @@
+# The services the project runs on. For now only Postgres, the bank's
+# application database; later the MCP server joins it here.
+#
+# Start (the first start sets the password, taken from the keyring):
+#     POSTGRES_PASSWORD="$(secret-tool lookup service loans-postgres account postgres)" docker compose up -d
+# Stop (the data is kept in the volume):
+#     docker compose down
+#
+# Store the password in the keyring once, before the first start:
+#     secret-tool store --label="Loans Postgres password" service loans-postgres account postgres
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: loans
+      POSTGRES_DB: loans
+      # Only read when the volume is first created; later starts keep it.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    ports:
+      # Reachable from this laptop only, not from the network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "loans", "-d", "loans"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  postgres-data:

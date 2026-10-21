@@ -3,8 +3,15 @@ kept by application ID.
 
 The agent never reads the store. Its tools do: each tool receives only the
 application ID, looks up what it needs here, and returns a safe result
-(reference passing). For now the store lives in memory and is filled from the
-eval cases; later it moves to Postgres without changing the tools.
+(reference passing).
+
+ApplicationStore keeps the cases in memory, for the tests and the direct
+runs. PostgresStore (loans.db.postgres_store) keeps them in Postgres, so a
+separate service can share them and they survive a restart. Both follow the
+same rules, written once here: only where the cases are kept differs. Every
+change to a case goes through one of the methods below, inside _changing, so
+the Postgres store can lock the case, save it and log the change in one
+transaction.
 
 If the store is given a run folder, every audit event is also written to the
 case's log file, <run folder>/<application ID>/audit.jsonl (one JSON line per
@@ -13,6 +20,8 @@ a crash loses nothing. The tests use no folder, so nothing is written to
 disk.
 """
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -183,22 +192,23 @@ class ApplicationStore:
                 f"upload slots {sorted(filled_slots(raw))}"
             )
         metadata = create_metadata(raw, now, application_id)
-        if metadata.application_id in self._applications:
+        if self.has(metadata.application_id):
             raise ValueError(f"application {metadata.application_id} already exists")
-        self._applications[metadata.application_id] = StoredApplication(
+        stored = StoredApplication(
             application_id=metadata.application_id,
             raw=raw,
             metadata=metadata,
             documents=documents,
             document_versions=dict.fromkeys(documents, 1),
         )
-        self.log_event(
-            metadata.application_id,
-            now,
-            "system",
-            "application_submitted",
-            "uploaded: " + (", ".join(sorted(documents)) or "nothing"),
-        )
+        with self._adding(stored):
+            self.log_event(
+                metadata.application_id,
+                now,
+                "system",
+                "application_submitted",
+                "uploaded: " + (", ".join(sorted(documents)) or "nothing"),
+            )
         return metadata.application_id
 
     def has(self, application_id: str) -> bool:
@@ -209,6 +219,23 @@ class ApplicationStore:
             return self._applications[application_id]
         except KeyError:
             raise UnknownApplication(application_id) from None
+
+    # Where the cases are kept. PostgresStore replaces these four methods and
+    # _append_event; the rules in the other methods stay the same.
+
+    @contextmanager
+    def _adding(self, stored: StoredApplication) -> Generator[None]:
+        """Add a new case, then run the body (which logs the submission)."""
+        self._applications[stored.application_id] = stored
+        yield
+
+    @contextmanager
+    def _changing(self, application_id: str) -> Generator[StoredApplication]:
+        """The case to change. In memory it is changed in place."""
+        yield self.get(application_id)
+
+    def _append_event(self, event: AuditEvent) -> None:
+        self.get(event.application_id).audit_log.append(event)
 
     def upload(
         self,
@@ -223,25 +250,25 @@ class ApplicationStore:
         Both the document and the form's slot are updated, so the field check
         and the tools always see the same state.
         """
-        stored = self.get(application_id)
         group, name = SLOT_PATHS[slot]
-        form = stored.raw.model_dump()
-        form[group][name] = file.model_dump()
-        stored.raw = RawApplication.model_validate(form)
-        stored.documents[slot] = document
-        stored.document_versions[slot] = stored.document_versions.get(slot, 0) + 1
-        self.log_event(application_id, now, "customer", "document_uploaded", slot)
+        with self._changing(application_id) as stored:
+            form = stored.raw.model_dump()
+            form[group][name] = file.model_dump()
+            stored.raw = RawApplication.model_validate(form)
+            stored.documents[slot] = document
+            stored.document_versions[slot] = stored.document_versions.get(slot, 0) + 1
+            self.log_event(application_id, now, "customer", "document_uploaded", slot)
 
     def record_message(self, application_id: str, message: SentMessage) -> None:
         """Keep a sent message on file."""
-        self.get(application_id).messages.append(message)
+        with self._changing(application_id) as stored:
+            stored.messages.append(message)
 
     def record_reply(self, application_id: str, reply: CustomerReply) -> None:
         """Keep a customer reply on file and log it. The log names only the
         uploaded slots and the corrected fields, never the message text or
         the values; the text is kept here, with the reply. The uploads and
         corrections themselves are applied with upload and correct_fields."""
-        self.get(application_id).replies.append(reply)
         parts = []
         if reply.message:
             parts.append("message")
@@ -249,29 +276,34 @@ class ApplicationStore:
             parts.append("uploaded: " + ", ".join(reply.uploads))
         if reply.corrected_fields:
             parts.append("corrected: " + ", ".join(sorted(reply.corrected_fields)))
-        self.log_event(
-            application_id,
-            reply.received_at,
-            "customer",
-            "customer_replied",
-            "; ".join(parts) or "empty reply",
-        )
+        with self._changing(application_id) as stored:
+            stored.replies.append(reply)
+            self.log_event(
+                application_id,
+                reply.received_at,
+                "customer",
+                "customer_replied",
+                "; ".join(parts) or "empty reply",
+            )
 
     def record_identity_findings(
         self, application_id: str, findings: IdentityFindings
     ) -> None:
         """Keep the identity vendor's latest findings on file."""
-        self.get(application_id).identity_findings = findings
+        with self._changing(application_id) as stored:
+            stored.identity_findings = findings
 
     def record_income_verification(
         self, application_id: str, verification: IncomeVerification
     ) -> None:
         """Keep the agent's income verification on file, replacing any earlier one."""
-        self.get(application_id).income_verification = verification
+        with self._changing(application_id) as stored:
+            stored.income_verification = verification
 
     def record_ending(self, application_id: str, ending: CaseEnding) -> None:
         """Keep the ending of the case on file."""
-        self.get(application_id).ending = ending
+        with self._changing(application_id) as stored:
+            stored.ending = ending
 
     def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example
@@ -282,23 +314,23 @@ class ApplicationStore:
         correction, as intake does at submission; a consent taken back loses
         its timestamp. A consent that was already given keeps its first time.
         """
-        stored = self.get(application_id)
         unknown = set(changes) - set(RawApplication.model_fields)
         if unknown:
             raise ValueError(f"unknown form fields: {sorted(unknown)}")
-        stored.raw = RawApplication.model_validate(stored.raw.model_dump() | changes)
-        stored.form_version += 1
-        metadata = stored.metadata
-        for field, time_field in CONSENT_TIMES.items():
-            if field not in changes:
-                continue
-            if not is_yes(changes[field]):
-                setattr(metadata, time_field, None)
-            elif getattr(metadata, time_field) is None:
-                setattr(metadata, time_field, now)
-        self.log_event(
-            application_id, now, "customer", "form_corrected", ", ".join(sorted(changes))
-        )
+        with self._changing(application_id) as stored:
+            stored.raw = RawApplication.model_validate(stored.raw.model_dump() | changes)
+            stored.form_version += 1
+            metadata = stored.metadata
+            for field, time_field in CONSENT_TIMES.items():
+                if field not in changes:
+                    continue
+                if not is_yes(changes[field]):
+                    setattr(metadata, time_field, None)
+                elif getattr(metadata, time_field) is None:
+                    setattr(metadata, time_field, now)
+            self.log_event(
+                application_id, now, "customer", "form_corrected", ", ".join(sorted(changes))
+            )
 
     def log_event(
         self,
@@ -322,7 +354,7 @@ class ApplicationStore:
             model=agent.model if agent else None,
             prompt_version=agent.prompt_version if agent else None,
         )
-        self.get(application_id).audit_log.append(audit_event)
+        self._append_event(audit_event)
         if self._run_dir is not None:
             case_dir = self._run_dir / application_id
             case_dir.mkdir(parents=True, exist_ok=True)

@@ -61,11 +61,13 @@ def send_message(
         )
         return f"not sent: {problem}"
 
+    # Counted from the case as read above, which does not change when the
+    # message is recorded (in Postgres it is a copy).
+    position = len(stored.messages) + 1
     store.record_message(
         application_id,
         SentMessage(message_id=call_id, sent_at=now, text=text, reason=reason),
     )
-    position = len(stored.messages)
     store.log_event(
         application_id, now, "agent", "message_sent", f"message {position}", reason
     )
