@@ -145,12 +145,16 @@ def load_case(folder: Path) -> EvalCase:
     return case
 
 
-def submit_case(store: ApplicationStore, case: EvalCase) -> str:
+def submit_case(
+    store: ApplicationStore, case: EvalCase, application_id: str | None = None
+) -> str:
     """Submit a case's application to the store, as at intake, at the case's
-    fixed start time. The application ID is the case ID."""
+    fixed start time. The application ID is the case ID unless another is
+    given (run.py gives each run's case its own ID, since cases stay in the
+    database)."""
     documents = {
         slot: case.documents[f"{slot}.json"] for slot in filled_slots(case.application)
     }
     return store.submit(
-        case.application, documents, case.info.start_time, application_id=case.case_id
+        case.application, documents, case.info.start_time, application_id=application_id or case.case_id
     )

@@ -74,6 +74,12 @@ class PostgresStore(ApplicationStore):
         super().__init__(run_dir, agent)
         self._conn = conn
 
+    @property
+    def connection(self) -> psycopg.Connection:
+        """The store's connection, for the workflow's other database work
+        (sessions)."""
+        return self._conn
+
     def has(self, application_id: str) -> bool:
         row = self._conn.execute(
             "SELECT 1 FROM applications WHERE application_id = %s", (application_id,)

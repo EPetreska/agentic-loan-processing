@@ -31,6 +31,10 @@ from loans.checks.ending import ending_problems
 from loans.schemas.outcome import Outcome
 from loans.store import ApplicationStore, CaseEnding
 
+# How finish's answer starts when the case has ended. The agent loop
+# (loans.agent.graph) stops on it, so the two share it.
+ENDED = "case ended"
+
 EVENT_BY_OUTCOME = {
     "complete": "application_completed",
     "cancelled": "application_cancelled",
@@ -64,7 +68,7 @@ def finish(
     ending = stored.ending
     if ending is not None:
         if ending.call_id == call_id:
-            return f"case ended: {ending.outcome} ({ending.reason})"
+            return f"{ENDED}: {ending.outcome} ({ending.reason})"
         problem = f"the case has already ended ({ending.outcome}, {ending.reason})"
         return blocked(f"not ended: {problem}", [problem])
 
@@ -100,4 +104,4 @@ def finish(
         chosen.reason,
         explanation,
     )
-    return f"case ended: {chosen.outcome} ({chosen.reason})"
+    return f"{ENDED}: {chosen.outcome} ({chosen.reason})"

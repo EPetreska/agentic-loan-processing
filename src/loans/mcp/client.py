@@ -85,6 +85,16 @@ def _problem(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+def server_is_running(url: str) -> bool:
+    """True if something answers at url. Any answer counts: without a token
+    the server refuses (401), which shows it is up."""
+    try:
+        httpx2.get(url, timeout=3)
+    except httpx2.TransportError:
+        return False
+    return True
+
+
 async def load_tools(url: str, token: str) -> list[BaseTool]:
     """The server's tools for the case the token opens, as LangChain tools."""
     try:

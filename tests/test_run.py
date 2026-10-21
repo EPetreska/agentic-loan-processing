@@ -1,14 +1,17 @@
-"""Tests for the run script's --show output."""
+"""Tests for the run script: its --show output, the files a run leaves, and
+what it says when Postgres or the MCP server is not running."""
 
 import json
 import os
 from pathlib import Path
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from loans.evals.case import load_case, submit_case
-from loans.evals.simulate import simulate_case
+from conftest import AGENT
 from loans import run
+from loans.audit import read_audit_log
+from loans.evals.case import load_case, submit_case
 from loans.run import LivePrinter, conversation, format_message, write_conversation
 from loans.store import ApplicationStore
 
@@ -74,11 +77,11 @@ def test_live_printer_labels_each_stream_once(capsys):
 
 def maria_after_a_simulated_run():
     """Maria's case through the scripted customer, with a fake LLM."""
-    from test_simulate import MARIA, FakeModel  # the same scripted run
+    from test_simulate import MARIA, FakeModel, run_simulation  # the same scripted run
 
     store = ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
-    result = simulate_case(case, store, FakeModel(messages=iter(MARIA)))
+    result = run_simulation(case, store, FakeModel(messages=iter(MARIA)))
     return case, store.get(result.application_id)
 
 
@@ -157,3 +160,39 @@ def test_a_key_already_set_is_kept(monkeypatch):
     run.load_keys("ollama:qwen3:4b")
     assert os.environ["LANGSMITH_API_KEY"] == "from-the-shell"
     assert looked_up == []
+
+
+# The run script through MCP. These need Postgres running (docker compose
+# up -d) and are skipped without it.
+
+
+def test_without_postgres_the_run_says_how_to_start_it(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://loans@127.0.0.1:9/loans")  # nothing listens there
+    with pytest.raises(SystemExit, match="docker compose up -d"):
+        run.open_bank_store(AGENT)
+
+
+def test_without_the_server_the_run_says_how_to_start_it(monkeypatch, pg_conninfo):
+    monkeypatch.setenv("DATABASE_URL", pg_conninfo)
+    monkeypatch.setenv("MCP_URL", "http://127.0.0.1:9/mcp")  # nothing listens there
+    with pytest.raises(SystemExit, match="uv run python -m loans.mcp.server"):
+        run.open_bank_store(AGENT)
+
+
+def test_a_run_through_mcp_leaves_its_files(monkeypatch, tmp_path, mcp_url, pg_conninfo, capsys):
+    from test_simulate import MARIA, FakeModel
+
+    monkeypatch.setenv("DATABASE_URL", pg_conninfo)
+    monkeypatch.setenv("MCP_URL", mcp_url)
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run, "make_model", lambda spec: FakeModel(messages=iter(MARIA)))
+    run.main(["02_maria_job_change", "--model", "fake:model"])
+
+    (case_dir,) = tmp_path.glob("*/02_maria_job_change@*")  # one folder, named by the run's ID
+    events = read_audit_log(case_dir / "audit.jsonl")
+    assert [e.event for e in events][-1] == "application_completed"
+    assert {e.model for e in events if e.actor == "agent"} == {"fake:model"}
+    assert json.loads((case_dir / "conversation.json").read_text())[1]["from"] == "agent"
+    out = capsys.readouterr().out
+    assert "ended: complete (all_checks_passed)" in out and f"MCP server at {mcp_url}" in out

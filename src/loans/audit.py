@@ -89,6 +89,13 @@ def format_audit_log(events: list[AuditEvent]) -> str:
     return "\n".join(lines)
 
 
+def write_audit_log(path: Path, events: list[AuditEvent]) -> None:
+    """Write the events to a log file, one JSON line each (the same format
+    the store writes as events happen), replacing the file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(event.model_dump_json() + "\n" for event in events))
+
+
 def read_audit_log(path: Path) -> list[AuditEvent]:
     """The events in a saved log file, oldest first."""
     with Path(path).open() as f:

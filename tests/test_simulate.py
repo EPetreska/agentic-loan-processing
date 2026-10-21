@@ -4,18 +4,27 @@ The fake LLM plays back fixed answers, so these tests check the simulation
 (replies, uploads, the clock, the safety limit), not the agent's judgment.
 """
 
+import asyncio
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
+from conftest import AGENT
+from loans.db.postgres_store import PostgresStore
 from loans.evals.case import load_case
 from loans.evals.simulate import SimulatedClock, simulate_case
 from loans.store import ApplicationStore
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 FINISH_COMPLETE = {"outcome": "complete", "reason": "all_checks_passed", "explanation": "Done."}
+
+
+def run_simulation(*args, **kwargs):
+    """Run the (async) simulation from a plain test."""
+    return asyncio.run(simulate_case(*args, **kwargs))
 
 
 class FakeModel(GenericFakeChatModel):
@@ -43,7 +52,7 @@ def ask(text="Please upload a recent pay stub.", call_id="call-ask"):
 def simulate(case_name, answers, max_pauses=10):
     store = ApplicationStore()
     case = load_case(CASES / case_name)
-    result = simulate_case(case, store, FakeModel(messages=iter(answers)), max_pauses=max_pauses)
+    result = run_simulation(case, store, FakeModel(messages=iter(answers)), max_pauses=max_pauses)
     return store, case, result
 
 
@@ -164,7 +173,7 @@ def test_after_a_reply_without_documents_the_wait_counts_from_the_reply():
     case.customer.replies[0].uploads = {}  # she replies but sends nothing
     cancel = {"outcome": "cancelled", "reason": "documents_not_provided", "explanation": "x"}
     answers = [ask(), wait(), wait(), step("finish", cancel)]
-    result = simulate_case(case, store, FakeModel(messages=iter(answers)))
+    result = run_simulation(case, store, FakeModel(messages=iter(answers)))
     stored = store.get(result.application_id)
     assert stored.ending.reason == "documents_not_provided"
     assert stored.ending.ended_at >= stored.replies[0].received_at + timedelta(days=26)
@@ -175,7 +184,7 @@ def test_on_message_receives_every_step_in_order():
     seen = []
     store = ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
-    simulate_case(case, store, FakeModel(messages=iter(MARIA)), on_message=seen.append)
+    run_simulation(case, store, FakeModel(messages=iter(MARIA)), on_message=seen.append)
     kinds = [m.type for m in seen]
     # start, then (agent call, tool result) x2, the wait text, the news, ...
     assert kinds[:7] == ["human", "ai", "tool", "ai", "tool", "ai", "human"]
@@ -186,8 +195,8 @@ def test_on_message_receives_every_step_in_order():
 def test_streaming_gives_the_same_result_as_without():
     store_a, store_b = ApplicationStore(), ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
-    a = simulate_case(case, store_a, FakeModel(messages=iter(MARIA)))
-    b = simulate_case(case, store_b, FakeModel(messages=iter(MARIA)), on_message=lambda m: None)
+    a = run_simulation(case, store_a, FakeModel(messages=iter(MARIA)))
+    b = run_simulation(case, store_b, FakeModel(messages=iter(MARIA)), on_message=lambda m: None)
     assert [m.content for m in a.messages] == [m.content for m in b.messages]
 
 
@@ -195,7 +204,7 @@ def test_on_token_receives_the_agents_words_while_it_writes():
     words = []
     store = ApplicationStore()
     case = load_case(CASES / "03_no_answer")
-    simulate_case(
+    run_simulation(
         case,
         store,
         FakeModel(messages=iter([wait("Waiting for the pay stub.")])),
@@ -209,11 +218,82 @@ def test_on_token_receives_the_agents_words_while_it_writes():
 def test_the_thread_is_the_case_unless_given():
     store = ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
-    default = simulate_case(case, store, FakeModel(messages=iter(MARIA)))
+    default = run_simulation(case, store, FakeModel(messages=iter(MARIA)))
     assert default.thread_id == "02_maria_job_change"
     store = ApplicationStore()
-    given = simulate_case(
+    given = run_simulation(
         case, store, FakeModel(messages=iter(MARIA)), thread_id="2026-10-21T04-25-37/02"
     )
     assert given.thread_id == "2026-10-21T04-25-37/02"
     assert store.get(given.application_id).ending.outcome == "complete"  # resumes still work
+
+
+# Through the MCP server: the agent's tools are the server's, and the case is
+# kept in Postgres. These need Postgres running (docker compose up -d) and are
+# skipped without it.
+
+ROBERT = [
+    ask(),
+    wait(),
+    step("finish", {"outcome": "cancelled", "reason": "no_answer", "explanation": "No reply."}),
+]
+
+
+def through_mcp(mcp_url, pg_conn, case_name, answers, application_id=None, **kwargs):
+    store = PostgresStore(pg_conn, agent=AGENT)
+    case = load_case(CASES / case_name)
+    result = run_simulation(
+        case, store, FakeModel(messages=iter(answers)),
+        application_id=application_id, mcp_url=mcp_url, **kwargs,
+    )
+    return store, result
+
+
+def open_sessions(pg_conn) -> int:
+    return pg_conn.execute("SELECT count(*) FROM case_sessions WHERE closed_at IS NULL").fetchone()[0]
+
+
+@pytest.mark.parametrize("case_name, answers", [("02_maria_job_change", MARIA), ("03_no_answer", ROBERT)])
+def test_through_mcp_a_case_ends_exactly_as_without(mcp_url, pg_conn, case_name, answers):
+    store, result = through_mcp(mcp_url, pg_conn, case_name, answers)
+    direct = ApplicationStore(agent=AGENT)
+    run_simulation(load_case(CASES / case_name), direct, FakeModel(messages=iter(answers)))
+    assert store.get(result.application_id) == direct.get(result.application_id)
+    assert not result.stopped_by_limit
+
+
+def test_the_session_is_closed_at_the_end(mcp_url, pg_conn):
+    through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA)
+    assert open_sessions(pg_conn) == 0
+
+
+def test_the_session_is_closed_when_the_run_fails(mcp_url, pg_conn):
+    # The fake LLM runs out of answers halfway: the run fails.
+    with pytest.raises(Exception):
+        through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA[:2])
+    assert open_sessions(pg_conn) == 0
+
+
+def test_each_run_keeps_its_own_case(mcp_url, pg_conn):
+    first, _ = through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA, "02_maria_job_change@run-1")
+    _, result = through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA, "02_maria_job_change@run-2")
+    assert result.application_id == "02_maria_job_change@run-2"
+    assert first.get("02_maria_job_change@run-1").ending.outcome == "complete"
+    assert first.get("02_maria_job_change@run-2").ending.outcome == "complete"
+
+
+def test_through_mcp_the_agents_events_name_the_model(mcp_url, pg_conn):
+    store, result = through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA)
+    agent_events = [e for e in store.get(result.application_id).audit_log if e.actor == "agent"]
+    assert agent_events and all(e.model == AGENT.model for e in agent_events)
+
+
+def test_through_mcp_the_tools_really_run_on_the_server(mcp_url, pg_conn):
+    # The results are the same either way, so they cannot show which way the
+    # tools ran. The session's clock can: only the server's tools move it, a
+    # minute per call, so after finish it stands one minute past the ending.
+    store, result = through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA)
+    (clock,) = pg_conn.execute(
+        "SELECT clock FROM case_sessions WHERE application_id = %s", (result.application_id,)
+    ).fetchone()
+    assert clock == store.get(result.application_id).ending.ended_at + timedelta(minutes=1)

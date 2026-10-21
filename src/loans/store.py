@@ -175,6 +175,11 @@ class ApplicationStore:
         # Added to agent and guardrail events.
         self._agent = agent
 
+    @property
+    def agent(self) -> AgentVersion | None:
+        """The model and prompt version added to agent and guardrail events."""
+        return self._agent
+
     def submit(
         self,
         raw: RawApplication,

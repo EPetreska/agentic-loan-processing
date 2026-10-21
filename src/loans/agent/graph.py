@@ -6,8 +6,12 @@ wait for the customer), the run pauses in the wait box (LangGraph's
 interrupt), and the checkpointer saves the conversation under the case's
 thread ID (the application ID). The caller resumes it later with what
 happened in the meantime (the customer's reply, or time passing), which the
-agent receives as a new message. The loop ends only when the case has ended
-(finish succeeded).
+agent receives as a new message. The loop ends only when the case has ended:
+when finish answers that it did.
+
+The loop decides everything from the conversation alone (the LLM's answers
+and the tools' answers) and never reads the bank's data itself: the agent
+reaches the bank only through its tools, which with MCP run on the server.
 
 The checkpointer is in memory for now, so a paused case lives as long as the
 program; a real deployment passes a database checkpointer (Postgres) so a
@@ -18,7 +22,7 @@ Which model runs is a setting (LLM_MODEL, for example "ollama:qwen3:4b" or
 """
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
@@ -28,7 +32,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import interrupt
 
 from loans.agent.prompt import SYSTEM_PROMPT
-from loans.store import ApplicationStore
+from loans.tools.finish import ENDED
 
 # The context window for local Ollama models, in tokens. Ollama otherwise uses
 # a small default and silently cuts off the start of a long conversation
@@ -61,19 +65,30 @@ def thread_config(application_id: str) -> dict:
     return {"configurable": {"thread_id": application_id}}
 
 
+def case_ended(messages: list[BaseMessage]) -> bool:
+    """True if the last tool step ended the case: finish answered that it
+    did. Only finish's own answer counts, not text from the LLM or from
+    another tool (a document cannot end the case by containing the words)."""
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage):
+            return False  # the tool step's answers are all at the end
+        if message.name == "finish" and str(message.content).startswith(f"{ENDED}:"):
+            return True
+    return False
+
+
 def build_graph(
     model: BaseChatModel,
     tools: list[BaseTool],
-    store: ApplicationStore,
-    application_id: str,
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
-    """The loop for one case. Runs need thread_config(application_id) in
-    their config; without a checkpointer given, one in memory is used."""
+    """The loop for one case, with that case's tools. Runs need a
+    thread_config in their config; without a checkpointer given, one in
+    memory is used."""
     model_with_tools = model.bind_tools(tools)
 
-    def agent(state: MessagesState) -> dict:
-        response = model_with_tools.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
+    async def agent(state: MessagesState) -> dict:
+        response = await model_with_tools.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
         return {"messages": [response]}
 
     def after_agent(state: MessagesState) -> str:
@@ -87,7 +102,7 @@ def build_graph(
         return {"messages": [HumanMessage(news)]}
 
     def after_tools(state: MessagesState) -> str:
-        return END if store.get(application_id).ending is not None else "agent"
+        return END if case_ended(state["messages"]) else "agent"
 
     graph = StateGraph(MessagesState)
     graph.add_node("agent", agent)
