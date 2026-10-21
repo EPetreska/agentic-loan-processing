@@ -39,6 +39,7 @@ EventName = Literal[
     "identity_checked",
     "message_sent",
     "income_verified",
+    "approval_requested",
     "application_completed",
     "application_cancelled",
     "sent_to_human",
@@ -47,6 +48,7 @@ EventName = Literal[
     # the bank's workflow, after the agent
     "credit_checked",
     "offer_created",
+    "offer_closed",
 ]
 
 

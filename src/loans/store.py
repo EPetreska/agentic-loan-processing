@@ -24,6 +24,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -122,6 +123,33 @@ class CaseEnding(BaseModel):
     ended_at: datetime
 
 
+class ApprovalRequest(BaseModel):
+    """The offer agent's request to a loan officer about a change the
+    customer asked for (for example more money or another term)."""
+
+    # The ID of the tool call that made the request, so a retried call is not
+    # stored twice.
+    request_id: str
+    requested_at: datetime
+    # What the customer wants, in the agent's words; kept here, not in the
+    # audit log, like the text of a message.
+    request: str
+    # Why the agent asks the officer, in its own words.
+    reason: str
+    # The officer's decision, once made.
+    status: Literal["pending", "approved", "declined"] = "pending"
+    decided_at: datetime | None = None
+    officer_note: str | None = None
+
+
+class OfferClosing(BaseModel):
+    """How the offer phase closed, recorded by the bank's workflow: the
+    customer signed the offer (accepted), or its deadline passed (expired)."""
+
+    outcome: Literal["accepted", "expired"]
+    closed_at: datetime
+
+
 class StoredApplication(BaseModel):
     application_id: str
     raw: RawApplication
@@ -154,8 +182,17 @@ class StoredApplication(BaseModel):
     # The offers made to the customer, oldest first: the one created after a
     # passed credit check, then any revised offer a loan officer approved.
     offers: list[Offer] = []
+    # The offer agent's requests to a loan officer, oldest first.
+    approval_requests: list[ApprovalRequest] = []
+    # Set once the offer phase has closed. The offer agent's tools refuse
+    # from then on, as the application agent's do after its ending.
+    offer_closing: OfferClosing | None = None
     # Everything that happened in the case, oldest first. Only ever added to.
     audit_log: list[AuditEvent] = []
+
+    def pending_approval(self) -> ApprovalRequest | None:
+        """The request still waiting for a loan officer's decision, if any."""
+        return next((r for r in self.approval_requests if r.status == "pending"), None)
 
     def identity_findings_are_current(self) -> bool:
         """True if identity findings are on file and refer to the current ID
@@ -346,6 +383,28 @@ class ApplicationStore:
                 application_id, now, "system", "offer_created", f"{offer.term_months} months"
             )
 
+    def record_approval_request(self, application_id: str, request: ApprovalRequest) -> None:
+        """Keep the request on file and log it, in one step. The log names the
+        request by its number and keeps the agent's reason, never the text."""
+        with self._changing(application_id) as stored:
+            stored.approval_requests.append(request)
+            self.log_event(
+                application_id,
+                request.requested_at,
+                "agent",
+                "approval_requested",
+                f"request {len(stored.approval_requests)}",
+                request.reason,
+            )
+
+    def record_offer_closing(self, application_id: str, closing: OfferClosing) -> None:
+        """Close the offer phase and log it, in one step."""
+        with self._changing(application_id) as stored:
+            stored.offer_closing = closing
+            self.log_event(
+                application_id, closing.closed_at, "system", "offer_closed", closing.outcome
+            )
+
     def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example
         {"annual_income": "78000"}). Only the field names are logged, never
@@ -401,6 +460,20 @@ class ApplicationStore:
             case_dir.mkdir(parents=True, exist_ok=True)
             with (case_dir / "audit.jsonl").open("a") as f:
                 f.write(audit_event.model_dump_json() + "\n")
+
+    def refuse_if_offer_closed(self, application_id: str, now: datetime, tool: str) -> str | None:
+        """For the offer agent's tools: before there is an offer, and once
+        the offer phase has closed, every action is refused and logged as
+        blocked. Returns the refusal, or None if the tool may act."""
+        stored = self.get(application_id)
+        if not stored.offers:
+            problem = "the case has no offer yet"
+        elif stored.offer_closing is not None:
+            problem = f"the offer phase has closed ({stored.offer_closing.outcome})"
+        else:
+            return None
+        self.log_event(application_id, now, "guardrail", "action_blocked", f"{tool}: {problem}")
+        return f"not done: {problem}"
 
     def refuse_if_ended(self, application_id: str, now: datetime, tool: str) -> str | None:
         """For tools: once the case has ended, every action is refused and
