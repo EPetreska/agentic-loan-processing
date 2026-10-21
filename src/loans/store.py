@@ -32,6 +32,7 @@ from loans.intake import create_metadata, is_yes
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
 from loans.schemas.documents import IncomeSlot, UploadedDocument, UploadSlot
 from loans.schemas.outcome import OutcomeKind, Reason
+from loans.services.credit_bureau import CreditCheckResult
 from loans.services.identity import IdentityFindings
 
 # Each consent on the form, and the metadata field holding when it was given.
@@ -147,6 +148,8 @@ class StoredApplication(BaseModel):
     replies: list[CustomerReply] = []
     # Set once the agent has ended the case.
     ending: CaseEnding | None = None
+    # The credit check, run by the bank's workflow after a complete ending.
+    credit_check: CreditCheckResult | None = None
     # Everything that happened in the case, oldest first. Only ever added to.
     audit_log: list[AuditEvent] = []
 
@@ -317,6 +320,18 @@ class ApplicationStore:
         """Keep the ending of the case on file."""
         with self._changing(application_id) as stored:
             stored.ending = ending
+
+    def record_credit_check(self, application_id: str, result: CreditCheckResult) -> None:
+        """Keep the credit check's result on file and log it, in one step."""
+        with self._changing(application_id) as stored:
+            stored.credit_check = result
+            self.log_event(
+                application_id,
+                result.checked_at,
+                "system",
+                "credit_checked",
+                "passed" if result.passed else "not passed",
+            )
 
     def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example

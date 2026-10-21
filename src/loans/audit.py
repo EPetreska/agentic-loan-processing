@@ -44,6 +44,8 @@ EventName = Literal[
     "sent_to_human",
     # guardrail
     "action_blocked",
+    # the bank's workflow, after the agent
+    "credit_checked",
 ]
 
 

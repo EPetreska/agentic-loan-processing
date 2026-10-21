@@ -289,6 +289,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"pauses to wait for the customer: {result.pauses}")
     if stored.ending is not None:
         print(f"ended: {stored.ending.outcome} ({stored.ending.reason})")
+        if stored.credit_check is not None:
+            print(f"credit check: {'passed' if stored.credit_check.passed else 'not passed'}")
     else:
         if result.stopped_by_limit:
             print("not ended: the agent kept waiting, so the simulation stopped")
