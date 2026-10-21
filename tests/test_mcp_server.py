@@ -23,13 +23,13 @@ from loans.mcp.sessions import SessionClock, close_session, open_session
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore
 from conftest import AGENT
-from loans.tools import descriptions
-from loans.tools.check_application import check_application
-from loans.tools.finish import finish
-from loans.tools.mark_income_verified import mark_income_verified
-from loans.tools.read_document import read_document
-from loans.tools.send_message import send_message
-from loans.tools.verify_identity import verify_identity
+from loans.tools.application import descriptions
+from loans.tools.application.check_application import check_application
+from loans.tools.application.finish import finish
+from loans.tools.application.mark_income_verified import mark_income_verified
+from loans.tools.application.read_document import read_document
+from loans.tools.application.send_message import send_message
+from loans.tools.application.verify_identity import verify_identity
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 PDF = RawFile(filename="stub.pdf", content_type="application/pdf")

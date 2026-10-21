@@ -7,7 +7,7 @@ import pytest
 from loans.evals.case import EvalCase, load_case, submit_case
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore, UnknownApplication
-from loans.tools.check_application import check_application
+from loans.tools.application.check_application import check_application
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 

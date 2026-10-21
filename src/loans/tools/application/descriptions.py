@@ -7,7 +7,7 @@ docstrings, for developers. Numbers come from the code (here the message
 limit), so a description cannot drift from the real rule.
 """
 
-from loans.tools.send_message import MAX_MESSAGE_LENGTH
+from loans.tools.application.send_message import MAX_MESSAGE_LENGTH
 
 CHECK_APPLICATION = (
     "Check that the application form is filled in correctly. Returns one line "

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from loans.agent.tools import make_tools
 from loans.evals.case import load_case, submit_case
 from loans.store import ApplicationStore
-from loans.tools.send_message import MAX_MESSAGE_LENGTH
+from loans.tools.application.send_message import MAX_MESSAGE_LENGTH
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 HIDDEN = {"store", "application_id", "now", "today", "clock", "call_id"}

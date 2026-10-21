@@ -9,10 +9,10 @@ from loans.evals.case import EvalCase, load_case, submit_case
 from loans.schemas.application import RawFile
 from loans.checks.ending import last_contact
 from loans.store import ApplicationStore, CustomerReply, filled_slots
-from loans.tools.finish import finish
-from loans.tools.mark_income_verified import mark_income_verified
-from loans.tools.send_message import send_message
-from loans.tools.verify_identity import verify_identity
+from loans.tools.application.finish import finish
+from loans.tools.application.mark_income_verified import mark_income_verified
+from loans.tools.application.send_message import send_message
+from loans.tools.application.verify_identity import verify_identity
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 JPG = RawFile(filename="id.jpg", content_type="image/jpeg")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from loans.evals.case import EvalCase, load_case, submit_case
 from loans.store import ApplicationStore
-from loans.tools.send_message import MAX_MESSAGE_LENGTH, send_message
+from loans.tools.application.send_message import MAX_MESSAGE_LENGTH, send_message
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 TEXT = "Please upload a recent pay stub."

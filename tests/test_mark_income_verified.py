@@ -6,7 +6,7 @@ from pathlib import Path
 from loans.evals.case import EvalCase, load_case, submit_case
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore
-from loans.tools.mark_income_verified import mark_income_verified
+from loans.tools.application.mark_income_verified import mark_income_verified
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 PDF = RawFile(filename="doc.pdf", content_type="application/pdf")

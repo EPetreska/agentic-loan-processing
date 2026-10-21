@@ -9,7 +9,7 @@ from loans.schemas.application import RawFile
 from loans.schemas.documents import UploadedDocument
 from loans.services.identity import normalize_name
 from loans.store import ApplicationStore
-from loans.tools.verify_identity import verify_identity
+from loans.tools.application.verify_identity import verify_identity
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 JPG = RawFile(filename="id.jpg", content_type="image/jpeg")

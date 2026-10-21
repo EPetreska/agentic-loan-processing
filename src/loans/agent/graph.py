@@ -32,7 +32,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import interrupt
 
 from loans.agent.prompt import SYSTEM_PROMPT
-from loans.tools.finish import ENDED
+from loans.tools.application.finish import ENDED
 
 # The context window for local Ollama models, in tokens. Ollama otherwise uses
 # a small default and silently cuts off the start of a long conversation

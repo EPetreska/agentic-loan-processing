@@ -22,8 +22,8 @@ Each call is checked before any tool runs:
   information about one call, so it is never a tool argument and the LLM never
   sees it.
 
-The tools then run the same code as the direct tools (loans.tools), with the
-same descriptions (loans.tools.descriptions), on a PostgresStore that adds the
+The tools then run the same code as the direct tools (loans.tools.application), with the
+same descriptions (loans.tools.application.descriptions), on a PostgresStore that adds the
 session's model and prompt version to the audit log. The time comes from the
 session's clock. Each call borrows its own database connection from a pool,
 so calls at the same time cannot mix their transactions.
@@ -53,13 +53,13 @@ from loans.mcp import CALL_ID_KEY
 from loans.mcp.sessions import InvalidToken, SessionClock, find_session
 from loans.schemas.documents import IncomeSlot
 from loans.schemas.outcome import OutcomeKind, Reason
-from loans.tools import descriptions
-from loans.tools.check_application import check_application as _check_application
-from loans.tools.finish import finish as _finish
-from loans.tools.mark_income_verified import mark_income_verified as _mark_income_verified
-from loans.tools.read_document import read_document as _read_document
-from loans.tools.send_message import send_message as _send_message
-from loans.tools.verify_identity import verify_identity as _verify_identity
+from loans.tools.application import descriptions
+from loans.tools.application.check_application import check_application as _check_application
+from loans.tools.application.finish import finish as _finish
+from loans.tools.application.mark_income_verified import mark_income_verified as _mark_income_verified
+from loans.tools.application.read_document import read_document as _read_document
+from loans.tools.application.send_message import send_message as _send_message
+from loans.tools.application.verify_identity import verify_identity as _verify_identity
 
 HOST = "127.0.0.1"
 PORT = 8000

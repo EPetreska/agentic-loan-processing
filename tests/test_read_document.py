@@ -8,7 +8,7 @@ from loans.evals.case import EvalCase, load_case, submit_case
 from loans.schemas.application import RawFile
 from loans.schemas.documents import UploadedDocument
 from loans.store import ApplicationStore
-from loans.tools.read_document import read_document
+from loans.tools.application.read_document import read_document
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 PDF = RawFile(filename="doc.pdf", content_type="application/pdf")

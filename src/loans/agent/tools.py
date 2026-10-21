@@ -1,13 +1,13 @@
 """The six tools, as the LLM sees them.
 
-make_tools wraps the plain tools in tools/ for LangGraph, for one case. The
+make_tools wraps the plain tools in tools/application/ for LangGraph, for one case. The
 store, the application ID and the clock are filled in here, and the call ID
 comes from the LLM's tool call (InjectedToolCallId), so none of them is part
 of the parameters the LLM sees: the LLM chooses only the slot, the text, the
 reason, the outcome and the explanation. The LLM is never given the
 application ID, so text in a prompt cannot point a tool at another case.
 
-What the LLM reads about each tool comes from loans.tools.descriptions, shared
+What the LLM reads about each tool comes from loans.tools.application.descriptions, shared
 with the MCP server (loans.mcp.server), which offers the same tools across the
 network.
 """
@@ -19,15 +19,15 @@ from typing import Annotated
 from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 
 from loans.schemas.documents import IncomeSlot
-from loans.tools import descriptions
+from loans.tools.application import descriptions
 from loans.schemas.outcome import OutcomeKind, Reason
 from loans.store import ApplicationStore
-from loans.tools.check_application import check_application as _check_application
-from loans.tools.finish import finish as _finish
-from loans.tools.mark_income_verified import mark_income_verified as _mark_income_verified
-from loans.tools.read_document import read_document as _read_document
-from loans.tools.send_message import send_message as _send_message
-from loans.tools.verify_identity import verify_identity as _verify_identity
+from loans.tools.application.check_application import check_application as _check_application
+from loans.tools.application.finish import finish as _finish
+from loans.tools.application.mark_income_verified import mark_income_verified as _mark_income_verified
+from loans.tools.application.read_document import read_document as _read_document
+from loans.tools.application.send_message import send_message as _send_message
+from loans.tools.application.verify_identity import verify_identity as _verify_identity
 
 CallId = Annotated[str, InjectedToolCallId]
 
