@@ -41,3 +41,24 @@ CREATE OR REPLACE TRIGGER audit_events_append_only
 CREATE OR REPLACE TRIGGER audit_events_not_emptied
     BEFORE TRUNCATE ON audit_events
     FOR EACH STATEMENT EXECUTE FUNCTION refuse_audit_change();
+
+-- Sessions: which case a caller may work on (see loans.mcp.sessions). Only a
+-- hash of each token is kept, so the tokens cannot be read from this table.
+CREATE TABLE IF NOT EXISTS case_sessions (
+    token_hash text PRIMARY KEY,
+    application_id text NOT NULL REFERENCES applications,
+    -- The case's current time. It is simulated in the evals, so the MCP
+    -- server and the simulation share it here.
+    clock timestamptz NOT NULL,
+    -- The running agent, for the audit log.
+    model text,
+    prompt_version text,
+    -- Real times, not the case's clock.
+    opened_at timestamptz NOT NULL DEFAULT now(),
+    closed_at timestamptz
+);
+
+-- At most one open session per case, so two agents cannot work on one case
+-- at the same time.
+CREATE UNIQUE INDEX IF NOT EXISTS case_sessions_one_open
+    ON case_sessions (application_id) WHERE closed_at IS NULL;
