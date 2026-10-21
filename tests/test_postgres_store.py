@@ -1,6 +1,8 @@
 """Tests for the Postgres store. They need Postgres running (docker compose
 up -d) and are skipped without it (see conftest.py)."""
 
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -134,3 +136,25 @@ def test_create_tables_can_run_again(pg_store, pg_conn):
 def test_the_store_needs_autocommit(pg_conninfo):
     with psycopg.connect(pg_conninfo) as conn, pytest.raises(ValueError, match="autocommit"):
         PostgresStore(conn)
+
+
+def test_two_programs_changing_one_case_do_not_lose_a_change(pg_store, pg_conninfo):
+    # Two programs (say the MCP server and the simulation) change Maria's case
+    # at the same moment, each with its own connection. The first holds its
+    # change open; the second must wait for it rather than save over it.
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(pg_store, case)
+    first = CustomerReply(received_at=case.info.start_time, message="First")
+    second = CustomerReply(received_at=case.info.start_time, message="Second")
+
+    with connect(pg_conninfo) as other_conn:
+        other = PostgresStore(other_conn)
+        program_2 = threading.Thread(target=other.record_reply, args=(app_id, second))
+        with pg_store._changing(app_id) as stored:  # program 1, in the middle of a change
+            stored.replies.append(first)
+            program_2.start()
+            time.sleep(0.3)
+            assert program_2.is_alive()  # waiting for program 1's lock
+        program_2.join(5)
+
+    assert [r.message for r in pg_store.get(app_id).replies] == ["First", "Second"]
