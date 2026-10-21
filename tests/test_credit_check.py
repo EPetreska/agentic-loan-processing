@@ -27,8 +27,8 @@ def test_a_complete_case_is_credit_checked():
     stored = simulate("02_maria_job_change", MARIA)
     assert stored.credit_check.passed
     assert stored.credit_check.checked_at == stored.ending.ended_at + timedelta(minutes=1)
-    last = stored.audit_log[-1]
-    assert (last.actor, last.event, last.details) == ("system", "credit_checked", "passed")
+    event = next(e for e in stored.audit_log if e.event == "credit_checked")
+    assert (event.actor, event.details) == ("system", "passed")
 
 
 @pytest.mark.parametrize(

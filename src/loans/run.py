@@ -291,6 +291,14 @@ def main(argv: list[str] | None = None) -> None:
         print(f"ended: {stored.ending.outcome} ({stored.ending.reason})")
         if stored.credit_check is not None:
             print(f"credit check: {'passed' if stored.credit_check.passed else 'not passed'}")
+        if stored.offers:
+            print("offers:")
+            for offer in stored.offers:
+                print(
+                    f"  {offer.term_months} months at {offer.apr * 100:.2f}% APR: "
+                    f"${offer.monthly_payment:,} a month, ${offer.total_of_payments:,} in total "
+                    f"(${offer.finance_charge:,} interest) for ${offer.amount:,}"
+                )
     else:
         if result.stopped_by_limit:
             print("not ended: the agent kept waiting, so the simulation stopped")

@@ -17,9 +17,10 @@ next, from the case's customer.json:
 A safety limit (MAX_PAUSES) stops the simulation if the agent keeps waiting
 without ending the case.
 
-When the agent completes the case, the simulation runs the bank's next step,
-as the workflow would: the credit check (loans.services.credit_bureau).
-Cancelled cases and cases sent to a human go no further. Time is simulated: the clock starts at the case's
+When the agent completes the case, the simulation runs the bank's next
+steps, as the workflow would: the credit check (loans.services.credit_bureau)
+and, when it passes, the offers (loans.offers). Cancelled cases and cases
+sent to a human go no further. Time is simulated: the clock starts at the case's
 start time and moves one minute per tool call, plus the jumps above.
 
 A pause is the run stopping in the agent loop's wait box; the checkpointer
@@ -60,6 +61,7 @@ from loans.checks.ending import last_contact
 from loans.evals.case import EvalCase, Reply, submit_case
 from loans.mcp.client import load_tools
 from loans.mcp.sessions import SessionClock, close_session, open_session
+from loans.offers import offers_for
 from loans.services.credit_bureau import check_credit
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore, CustomerReply
@@ -181,6 +183,8 @@ async def simulate_case(
                 if stored.ending.outcome == "complete":
                     result = check_credit(stored.metadata, clock())
                     store.record_credit_check(application_id, result)
+                    if result.passed:
+                        store.record_offers(application_id, offers_for(stored.raw), clock())
                 return SimulationResult(application_id, thread_id, messages, pauses, False)
             if pauses == max_pauses:
                 return SimulationResult(application_id, thread_id, messages, pauses, True)

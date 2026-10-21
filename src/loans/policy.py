@@ -39,3 +39,17 @@ TAX_RETURN_MAX_YEARS_OLD = 1
 # wages, or the tax return's net profit) must be within this fraction of the
 # claimed income. Exactly 5% counts as within.
 INCOME_TOLERANCE = Decimal("0.05")
+
+# Loan offers. After the credit check, the bank offers the amount the
+# customer asked for at the term they asked for and at the next shorter and
+# the next longer term (src/loans/offers.py). The yearly rate for each term
+# the form allows: illustrative rates for a borrower with good credit,
+# slightly higher for longer terms, as at real lenders. There are no fees, so
+# the APR equals the rate.
+OFFER_RATES = {
+    12: Decimal("0.0849"),
+    24: Decimal("0.0899"),
+    36: Decimal("0.0999"),
+    48: Decimal("0.1099"),
+    60: Decimal("0.1199"),
+}

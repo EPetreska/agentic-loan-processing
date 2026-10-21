@@ -32,6 +32,7 @@ from loans.intake import create_metadata, is_yes
 from loans.schemas.application import RawApplication, RawFile, SubmissionMetadata
 from loans.schemas.documents import IncomeSlot, UploadedDocument, UploadSlot
 from loans.schemas.outcome import OutcomeKind, Reason
+from loans.offers import Offer
 from loans.services.credit_bureau import CreditCheckResult
 from loans.services.identity import IdentityFindings
 
@@ -150,6 +151,9 @@ class StoredApplication(BaseModel):
     ending: CaseEnding | None = None
     # The credit check, run by the bank's workflow after a complete ending.
     credit_check: CreditCheckResult | None = None
+    # The offers created after a passed credit check, shortest term first:
+    # the whole allowed space for the offer agent.
+    offers: list[Offer] = []
     # Everything that happened in the case, oldest first. Only ever added to.
     audit_log: list[AuditEvent] = []
 
@@ -332,6 +336,14 @@ class ApplicationStore:
                 "credit_checked",
                 "passed" if result.passed else "not passed",
             )
+
+    def record_offers(self, application_id: str, offers: list[Offer], now: datetime) -> None:
+        """Keep the created offers on file and log them, in one step. The log
+        names the terms only."""
+        with self._changing(application_id) as stored:
+            stored.offers = offers
+            terms = ", ".join(str(offer.term_months) for offer in offers)
+            self.log_event(application_id, now, "system", "offers_created", f"{terms} months")
 
     def correct_fields(self, application_id: str, changes: dict, now: datetime) -> None:
         """The customer corrects form fields, as typed (for example
