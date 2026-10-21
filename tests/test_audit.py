@@ -77,7 +77,10 @@ def test_details_and_reasons():
     store, app_id, case = submitted()
     run_maria(store, app_id, case)
     log = {e.event: e for e in reversed(store.get(app_id).audit_log)}  # first of each
-    assert log["application_submitted"].details == "uploaded: id_back, id_front, pay_stub, w2"
+    # Maria wrote with her application: the log says so, without the text.
+    assert log["application_submitted"].details == (
+        "uploaded: id_back, id_front, pay_stub, w2; with a message"
+    )
     assert log["form_checked"].details == "form complete: yes (0 errors, 0 warnings)"
     assert log["document_read"].details == "pay_stub: bank income rules not met"
     assert log["message_sent"].reason == "Pay stub too old."
@@ -202,7 +205,8 @@ def test_format_audit_log():
     run_maria(store, app_id, case)
     lines = format_audit_log(store.get(app_id).audit_log).splitlines()
     assert lines[0] == (
-        "2026-09-14 15:00  system     application_submitted  uploaded: id_back, id_front, pay_stub, w2"
+        "2026-09-14 15:00  system     application_submitted  "
+        "uploaded: id_back, id_front, pay_stub, w2; with a message"
     )
     assert lines[4] == (
         '2026-09-14 15:00  agent      message_sent           message 1  reason: "Pay stub too old."'

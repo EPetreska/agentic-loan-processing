@@ -70,7 +70,7 @@ from loans.agent.graph import make_model
 from loans.agent.prompt import PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log, write_audit_log
 from loans.db.postgres_store import PostgresStore, connect, create_tables, database_conninfo
-from loans.evals.case import EvalCase, load_case
+from loans.evals.case import load_case
 from loans.evals.simulate import simulate_case
 from loans.keyring import API_KEYS, keyring_lookup
 from loans.mcp.client import server_is_running
@@ -107,17 +107,17 @@ def load_keys(model_spec: str) -> None:
 MAX_STEPS = 60
 
 
-def conversation(case: EvalCase, stored: StoredApplication) -> list[dict]:
-    """The messages between the agent and the customer, oldest first: the
-    customer's message sent with the application, the agent's messages and
-    the customer's replies."""
+def conversation(stored: StoredApplication) -> list[dict]:
+    """The messages between the agent and the customer, oldest first, as the
+    bank has them on file: the customer's message sent with the application,
+    the agent's messages and the customer's replies."""
     entries = []
-    if case.customer.first_message:
+    if stored.first_message:
         entries.append(
             {
                 "at": stored.metadata.submitted_at,
                 "from": "customer",
-                "text": case.customer.first_message,
+                "text": stored.first_message,
                 "with_application": True,
             }
         )
@@ -139,9 +139,9 @@ def conversation(case: EvalCase, stored: StoredApplication) -> list[dict]:
     return [{**entry, "at": entry["at"].isoformat()} for entry in entries]
 
 
-def write_conversation(path: Path, case: EvalCase, stored: StoredApplication) -> None:
+def write_conversation(path: Path, stored: StoredApplication) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(conversation(case, stored), indent=2) + "\n")
+    path.write_text(json.dumps(conversation(stored), indent=2) + "\n")
 
 
 def format_message(message: BaseMessage, with_text: bool = True) -> str:
@@ -278,7 +278,7 @@ def main(argv: list[str] | None = None) -> None:
         # Also if the run fails halfway, what happened so far is kept.
         if store.has(application_id):
             stored = store.get(application_id)
-            write_conversation(case_dir / "conversation.json", case, stored)
+            write_conversation(case_dir / "conversation.json", stored)
             if not args.direct:  # with --direct, written as it happened
                 write_audit_log(case_dir / "audit.jsonl", stored.audit_log)
 

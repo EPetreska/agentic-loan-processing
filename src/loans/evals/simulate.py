@@ -163,7 +163,9 @@ async def simulate_case(
         answered = 0  # how many of the agent's messages the customer has reacted to
         pauses = 0
 
-        start = HumanMessage(first_turn(case.customer.first_message, clock.now.date()))
+        # The customer's first message as the bank has it on file.
+        first_message = store.get(application_id).first_message
+        start = HumanMessage(first_turn(first_message, clock.now.date()))
         if on_message:
             on_message(start)
         run_input = {"messages": [start]}

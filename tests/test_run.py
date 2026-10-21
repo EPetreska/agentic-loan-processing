@@ -87,7 +87,7 @@ def maria_after_a_simulated_run():
 
 def test_conversation_in_order():
     case, stored = maria_after_a_simulated_run()
-    entries = conversation(case, stored)
+    entries = conversation(stored)
     assert [(e["from"], e["text"]) for e in entries] == [
         ("customer", case.customer.first_message),
         ("agent", "Please upload a recent pay stub."),
@@ -102,15 +102,15 @@ def test_conversation_in_order():
 def test_conversation_file(tmp_path):
     case, stored = maria_after_a_simulated_run()
     path = tmp_path / "run" / "02_maria_job_change.conversation.json"
-    write_conversation(path, case, stored)
-    assert json.loads(path.read_text()) == conversation(case, stored)
+    write_conversation(path, stored)
+    assert json.loads(path.read_text()) == conversation(stored)
 
 
 def test_conversation_without_any_messages():
     store = ApplicationStore()
     case = load_case(CASES / "01_clean_application")
     stored = store.get(submit_case(store, case))
-    assert conversation(case, stored) == []
+    assert conversation(stored) == []
 
 
 def fake_keyring(monkeypatch, secrets):

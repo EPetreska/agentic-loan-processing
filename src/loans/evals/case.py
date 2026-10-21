@@ -151,10 +151,14 @@ def submit_case(
     """Submit a case's application to the store, as at intake, at the case's
     fixed start time. The application ID is the case ID unless another is
     given (run.py gives each run's case its own ID, since cases stay in the
-    database)."""
+    database). The customer's first message is submitted with it."""
     documents = {
         slot: case.documents[f"{slot}.json"] for slot in filled_slots(case.application)
     }
     return store.submit(
-        case.application, documents, case.info.start_time, application_id=application_id or case.case_id
+        case.application,
+        documents,
+        case.info.start_time,
+        application_id=application_id or case.case_id,
+        first_message=case.customer.first_message,
     )

@@ -209,3 +209,14 @@ def test_a_reply_with_only_a_message():
     app_id = submit_case(store, case)
     store.record_reply(app_id, CustomerReply(received_at=case.info.start_time, message="Thanks!"))
     assert store.get(app_id).audit_log[-1].details == "message"
+
+
+def test_the_message_with_the_application_is_kept_but_not_logged():
+    store = ApplicationStore()
+    text = "I switched jobs in March. My SSN is 538-72-1904."
+    app_id = store.submit(RawApplication(), {}, NOW, first_message=text)
+    stored = store.get(app_id)
+    assert stored.first_message == text
+    event = stored.audit_log[0]
+    assert event.details == "uploaded: nothing; with a message"
+    assert "538-72-1904" not in event.model_dump_json()  # the text is not logged

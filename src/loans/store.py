@@ -136,6 +136,11 @@ class StoredApplication(BaseModel):
     identity_findings: IdentityFindings | None = None
     # The agent's latest income verification.
     income_verification: IncomeVerification | None = None
+    # The message the customer wrote with the application, if any (sent at
+    # submission, metadata.submitted_at). Kept apart from the replies: it
+    # answers nothing, and the waiting rules count from the agent's messages
+    # and the customer's replies.
+    first_message: str | None = None
     # Messages sent to the customer, oldest first.
     messages: list[SentMessage] = []
     # Replies from the customer, oldest first.
@@ -186,10 +191,13 @@ class ApplicationStore:
         documents: dict[str, UploadedDocument],
         now: datetime,
         application_id: str | None = None,
+        first_message: str | None = None,
     ) -> str:
         """Store a new application (intake) and return its ID.
 
-        documents holds the document behind each filled upload slot.
+        documents holds the document behind each filled upload slot;
+        first_message is what the customer wrote with the application, if
+        anything. The log says that a message came with it, never the text.
         """
         if set(documents) != set(filled_slots(raw)):
             raise ValueError(
@@ -205,14 +213,14 @@ class ApplicationStore:
             metadata=metadata,
             documents=documents,
             document_versions=dict.fromkeys(documents, 1),
+            first_message=first_message,
         )
+        details = "uploaded: " + (", ".join(sorted(documents)) or "nothing")
+        if first_message:
+            details += "; with a message"
         with self._adding(stored):
             self.log_event(
-                metadata.application_id,
-                now,
-                "system",
-                "application_submitted",
-                "uploaded: " + (", ".join(sorted(documents)) or "nothing"),
+                metadata.application_id, now, "system", "application_submitted", details
             )
         return metadata.application_id
 

@@ -16,8 +16,16 @@ fix them or choose another ending. Used by the finish tool.
   since the last contact, never earlier (policy.py). The last contact is the
   agent's last message or the customer's last reply, whichever is later, so a
   customer who answered gets the full 26 days again.
-- cancelled because the customer withdrew or refused the credit check: the
-  agent's judgment from the customer's messages, stated in its explanation.
+- cancelled because the customer withdrew (customer_withdrew): only if the
+  customer has written to the bank (the message with the application, or a
+  reply with text). Uploads and form corrections alone do not count.
+- cancelled because the customer refused the credit check
+  (credit_consent_refused): only if the form shows no credit check consent
+  (the bank's record of consent, which only the customer can change) and the
+  customer has written to the bank.
+  For both, whether the customer meant it stays the agent's judgment, stated
+  in its explanation; the code makes sure the customer said something, so an
+  agent misled by text in a document cannot cancel a case on its own.
 - sent_to_human: always allowed. Handing a case to a person is the safe
   direction.
 """
@@ -121,10 +129,38 @@ def _waiting_problems(stored: StoredApplication, now: datetime) -> list[str]:
     return []
 
 
+def customer_wrote(stored: StoredApplication) -> bool:
+    """True if the customer has written to the bank: a message with the
+    application, or a reply with text."""
+    texts = [stored.first_message, *(reply.message for reply in stored.replies)]
+    return any(text and text.strip() for text in texts)
+
+
+def _withdrawal_problems(stored: StoredApplication) -> list[str]:
+    if not customer_wrote(stored):
+        return ["the customer has not written to the bank, so a withdrawal cannot be recorded"]
+    return []
+
+
+def _consent_refusal_problems(stored: StoredApplication) -> list[str]:
+    problems = []
+    if stored.metadata.credit_check_consented_at is not None:
+        problems.append(
+            "the form shows the credit check consent as given; only the customer can change it"
+        )
+    if not customer_wrote(stored):
+        problems.append("the customer has not written to the bank, so a refusal cannot be recorded")
+    return problems
+
+
 def ending_problems(stored: StoredApplication, ending: Outcome, now: datetime) -> list[str]:
     """Every reason the case may not end this way. Empty if it may."""
     if ending.outcome == "complete":
         return _complete_problems(stored, now.date())
     if ending.reason in WAITING_REASONS:
         return _waiting_problems(stored, now)
+    if ending.reason == "customer_withdrew":
+        return _withdrawal_problems(stored)
+    if ending.reason == "credit_consent_refused":
+        return _consent_refusal_problems(stored)
     return []

@@ -90,8 +90,10 @@ Call finish exactly once, with one of these outcomes and reasons:
 - cancelled / no_answer: the customer did not answer.
 - cancelled / documents_not_provided: the customer answered but never sent the
   required documents.
-- cancelled / customer_withdrew: the customer no longer wants the loan.
-- cancelled / credit_consent_refused: the customer refuses the credit check.
+- cancelled / customer_withdrew: the customer no longer wants the loan and has
+  said so in writing.
+- cancelled / credit_consent_refused: the customer has not given credit check
+  consent on the form and has said in writing that they refuse it.
 - sent_to_human / other_employment, esign_declined, identity_review,
   identity_failed, under_18, suspected_manipulation, customer_requested_human
   or agent_unsure.
