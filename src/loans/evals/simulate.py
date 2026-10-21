@@ -74,6 +74,8 @@ class SimulatedClock:
 @dataclass
 class SimulationResult:
     application_id: str
+    # The checkpointer thread the conversation was kept under.
+    thread_id: str
     # The whole conversation the agent saw, oldest first.
     messages: list[BaseMessage]
     # How many times the agent stopped to wait.
@@ -90,6 +92,7 @@ def simulate_case(
     max_pauses: int = MAX_PAUSES,
     on_message: Callable[[BaseMessage], None] | None = None,
     on_token: Callable[[str, str], None] | None = None,
+    thread_id: str | None = None,
 ) -> SimulationResult:
     """Run the agent on one case until the case ends or the limit is hit.
 
@@ -97,11 +100,17 @@ def simulate_case(
     message that starts the case, each answer of the agent, each tool result,
     and each message that resumes the case. on_token, if given, is called with
     the model's words while it writes them, as ("thinking", text) or
-    ("answer", text). run.py --show uses both."""
+    ("answer", text). run.py --show uses both.
+
+    thread_id names the checkpointer thread that keeps the conversation
+    (default: the application ID). LangGraph also passes it to LangSmith,
+    which groups the traces of one thread, so run.py makes it unique per run:
+    otherwise every run of the same case would end up in one thread."""
     application_id = submit_case(store, case)
     clock = SimulatedClock(case.info.start_time)
     graph = build_graph(model, make_tools(store, application_id, clock), store, application_id)
-    config = {**(config or {}), **thread_config(application_id)}
+    thread_id = thread_id or application_id
+    config = {**(config or {}), **thread_config(thread_id)}
     replies = list(case.customer.replies)
     answered = 0  # how many of the agent's messages the customer has reacted to
     pauses = 0
@@ -114,9 +123,9 @@ def simulate_case(
         messages = _run(graph, run_input, config, on_message, on_token)
         stored = store.get(application_id)
         if stored.ending is not None:
-            return SimulationResult(application_id, messages, pauses, False)
+            return SimulationResult(application_id, thread_id, messages, pauses, False)
         if pauses == max_pauses:
-            return SimulationResult(application_id, messages, pauses, True)
+            return SimulationResult(application_id, thread_id, messages, pauses, True)
         pauses += 1
 
         sent = stored.messages

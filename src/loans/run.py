@@ -237,6 +237,11 @@ def main(argv: list[str] | None = None) -> None:
                 "metadata": {"model": model_spec, "prompt_version": PROMPT_VERSION},
             },
             **({"on_message": printer.message, "on_token": printer.token} if args.show else {}),
+            # One thread per run: LangGraph passes the thread ID to LangSmith,
+            # which groups traces by it. (LangSmith's thread view cannot show
+            # the part after a pause, which starts with a resume command; such
+            # traces open from the Runs tab.)
+            thread_id=f"{run_dir.name}/{case.case_id}",
         )
     finally:
         # Also if the run fails halfway, the messages so far are kept.

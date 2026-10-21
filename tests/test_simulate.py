@@ -204,3 +204,16 @@ def test_on_token_receives_the_agents_words_while_it_writes():
     )
     assert "".join(text for kind, text in words if kind == "answer") == "Waiting for the pay stub."
     assert len(words) > 1  # in pieces, as written, not all at once
+
+
+def test_the_thread_is_the_case_unless_given():
+    store = ApplicationStore()
+    case = load_case(CASES / "02_maria_job_change")
+    default = simulate_case(case, store, FakeModel(messages=iter(MARIA)))
+    assert default.thread_id == "02_maria_job_change"
+    store = ApplicationStore()
+    given = simulate_case(
+        case, store, FakeModel(messages=iter(MARIA)), thread_id="2026-10-21T04-25-37/02"
+    )
+    assert given.thread_id == "2026-10-21T04-25-37/02"
+    assert store.get(given.application_id).ending.outcome == "complete"  # resumes still work
