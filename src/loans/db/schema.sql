@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS case_sessions (
     closed_at timestamptz
 );
 
+-- Which agent the session was opened for ("application" or "offer"): the
+-- MCP server lets a session use only that agent's tools. Added after the
+-- table was first made, so an existing database gets it too; sessions from
+-- before were all the application agent's.
+ALTER TABLE case_sessions ADD COLUMN IF NOT EXISTS agent_name text NOT NULL DEFAULT 'application'
+    CHECK (agent_name IN ('application', 'offer'));
+
 -- At most one open session per case, so two agents cannot work on one case
 -- at the same time.
 CREATE UNIQUE INDEX IF NOT EXISTS case_sessions_one_open

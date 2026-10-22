@@ -23,7 +23,8 @@ from psycopg_pool import ConnectionPool
 from loans.audit import AgentVersion
 from loans.db.postgres_store import PostgresStore, connect, create_tables, database_conninfo
 from loans.evals.case import load_case, submit_case
-from loans.mcp.server import create_server
+from loans.mcp.server import create_app
+from loans.rag.search import SearchResult
 from loans.mcp.sessions import open_session
 
 TEST_DATABASE = "loans_test"
@@ -72,16 +73,21 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+# What the test server's document search always finds (the real search is
+# tested in test_rag_search.py and needs Ollama).
+SERVER_SECTION = SearchResult(chunk_id="bank-07", document="bank", title="Paying early",
+                              text="No prepayment penalty.", source="the bank's own document", distance=0.1)  # fmt: skip
+
+
 @pytest.fixture(scope="module")
 def mcp_url(pg_conninfo):
-    """The MCP server's address, with the server running on the test
-    database in a background thread, as it would run on its own."""
+    """The MCP server's address (its endpoints are at /application and
+    /offer under it), with the server running on the test database in a
+    background thread, as it would run on its own."""
     port = free_port()
     url = f"http://127.0.0.1:{port}"
     with ConnectionPool(pg_conninfo, kwargs={"autocommit": True}, min_size=1, max_size=5) as pool:
-        app = create_server(pool, url).streamable_http_app(
-            stateless_http=True, json_response=True, host="127.0.0.1"
-        )
+        app = create_app(pool, url, search=lambda conn, query: [SERVER_SECTION])
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()
@@ -92,9 +98,21 @@ def mcp_url(pg_conninfo):
         thread.join(5)
 
 
+@pytest.fixture(scope="module")
+def application_url(mcp_url):
+    """The application agent's endpoint."""
+    return f"{mcp_url}/application"
+
+
+@pytest.fixture(scope="module")
+def offer_url(mcp_url):
+    """The offer agent's endpoint."""
+    return f"{mcp_url}/offer"
+
+
 @pytest.fixture
 def maria(pg_store, pg_conn):
     """Maria's case, submitted, with an open session: (case, ID, token)."""
     case = load_case(CASES / "02_maria_job_change")
     app_id = submit_case(pg_store, case)
-    return case, app_id, open_session(pg_conn, app_id, case.info.start_time, AGENT)
+    return case, app_id, open_session(pg_conn, app_id, "application", case.info.start_time, AGENT)

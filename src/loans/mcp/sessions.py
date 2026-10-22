@@ -6,9 +6,11 @@ call never names a case. Instead, when the bank's workflow (run.py) starts the
 agent on a case, it opens a session for that case and gets a token, a random
 code, which it hands to the agent. The agent sends the token with every call,
 and the server finds the case from it. A token opens one case only, and stops
-working when the session is closed. It does across the network what
-make_application_tools does inside one program, where the case ID is built
-into the tools.
+working when the session is closed. A session is also for one agent (the
+application agent or the offer agent), and the server lets its token use
+only that agent's tools. It does across the network what
+make_application_tools and make_offer_tools do inside one program, where
+the case ID is built into the tools.
 
 The workflow is trusted, so it opens and closes sessions by writing to the
 database directly; the server only checks tokens. A case has at most one
@@ -28,12 +30,16 @@ agent, for the audit log.
 import hashlib
 import secrets
 from datetime import datetime
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import psycopg
 
 from loans.audit import AgentVersion
 from loans.store import UnknownApplication
+
+
+# The agents a session can be opened for.
+AgentName = Literal["application", "offer"]
 
 
 class InvalidToken(LookupError):
@@ -42,6 +48,9 @@ class InvalidToken(LookupError):
 
 class Session(NamedTuple):
     application_id: str
+    # Which agent the session is for, and that agent's model and prompt
+    # version (for the audit log).
+    agent_name: AgentName
     agent: AgentVersion | None
 
 
@@ -52,19 +61,22 @@ def _hash(token: str) -> str:
 def open_session(
     conn: psycopg.Connection,
     application_id: str,
+    agent_name: AgentName,
     start: datetime,
     agent: AgentVersion | None = None,
 ) -> str:
-    """Open a session for one case, with its clock at start, and return its
-    token. Refused if the case already has an open session."""
+    """Open a session for one agent on one case, with its clock at start, and
+    return its token. Refused if the case already has an open session."""
     token = secrets.token_urlsafe(32)
     try:
         conn.execute(
-            "INSERT INTO case_sessions (token_hash, application_id, clock, model, prompt_version)"
-            " VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO case_sessions"
+            " (token_hash, application_id, agent_name, clock, model, prompt_version)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
             (
                 _hash(token),
                 application_id,
+                agent_name,
                 start,
                 agent.model if agent else None,
                 agent.prompt_version if agent else None,
@@ -89,15 +101,15 @@ def find_session(conn: psycopg.Connection, token: str) -> Session | None:
     """The case and agent of the open session with this token, or None if the
     token is unknown or its session is closed."""
     row = conn.execute(
-        "SELECT application_id, model, prompt_version FROM case_sessions"
+        "SELECT application_id, agent_name, model, prompt_version FROM case_sessions"
         " WHERE token_hash = %s AND closed_at IS NULL",
         (_hash(token),),
     ).fetchone()
     if row is None:
         return None
-    application_id, model, prompt_version = row
+    application_id, agent_name, model, prompt_version = row
     agent = AgentVersion(model=model, prompt_version=prompt_version) if model else None
-    return Session(application_id, agent)
+    return Session(application_id, agent_name, agent)
 
 
 class SessionClock:

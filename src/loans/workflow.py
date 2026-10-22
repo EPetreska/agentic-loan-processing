@@ -152,7 +152,8 @@ async def open_case_for_agent(
     """Access to one case for an agent, while the context is open: the tools
     that agent may use on that case, and the case's clock. Through the MCP
     server if mcp_url is given (the clock is then the session's, shared with
-    the server), else directly with direct_clock. The offer agent needs the
+    the server; mcp_url is the server's address, and the agent's endpoint is
+    under it), else directly with direct_clock. The offer agent needs the
     document search (search), and works only directly for now."""
     if agent == "offer":
         if search is None:
@@ -165,9 +166,9 @@ async def open_case_for_agent(
         yield make_application_tools(store, application_id, direct_clock), direct_clock
         return
     conn = store.connection  # a PostgresStore: the server works on the same database
-    token = open_session(conn, application_id, start, store.agent)
+    token = open_session(conn, application_id, agent, start, store.agent)
     try:
-        yield await load_tools(mcp_url, token), SessionClock(conn, token)
+        yield await load_tools(f"{mcp_url}/{agent}", token), SessionClock(conn, token)
     finally:
         close_session(conn, token)
 
