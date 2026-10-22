@@ -21,8 +21,10 @@ Which model runs is a setting (LLM_MODEL, for example "ollama:qwen3:4b" or
 "anthropic:claude-sonnet-5-5"), so switching models needs no code change.
 """
 
+from collections.abc import Callable
+
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
@@ -115,3 +117,38 @@ def build_graph(
     graph.add_conditional_edges("tools", after_tools, ["agent", END])
     graph.add_edge("wait", "agent")
     return graph.compile(checkpointer=checkpointer or InMemorySaver())
+
+
+async def run_until_pause(
+    graph: CompiledStateGraph,
+    run_input,
+    config: dict,
+    on_message: Callable[[BaseMessage], None] | None = None,
+    on_token: Callable[[str, str], None] | None = None,
+) -> list[BaseMessage]:
+    """Run the agent until it pauses (to wait) or ends, and return the whole
+    conversation. run_input starts a run ({"messages": [...]}) or resumes a
+    paused one (Command(resume=news)). With on_message or on_token, the run is streamed: finished messages step
+    by step ("updates"), and the model's words as it writes them
+    ("messages")."""
+    if on_message is None and on_token is None:
+        await graph.ainvoke(run_input, config)
+        return (await graph.aget_state(config)).values["messages"]
+
+    modes = ["updates", "messages"] if on_token else ["updates"]
+    async for mode, data in graph.astream(run_input, config, stream_mode=modes):
+        if mode == "messages":
+            chunk, _ = data
+            if isinstance(chunk, AIMessageChunk):
+                thinking = chunk.additional_kwargs.get("reasoning_content")
+                if thinking:
+                    on_token("thinking", thinking)
+                if isinstance(chunk.content, str) and chunk.content:
+                    on_token("answer", chunk.content)
+        elif on_message:
+            for node, values in data.items():
+                if node.startswith("__"):  # for example __interrupt__: the pause itself
+                    continue
+                for message in (values or {}).get("messages", []):
+                    on_message(message)
+    return (await graph.aget_state(config)).values["messages"]

@@ -1,5 +1,13 @@
-"""simulate_case: runs one eval case from start to end, playing the scripted
-customer.
+"""simulate_case: runs one eval case from start to end, playing the outside
+world: the scripted customer, and time.
+
+It is only for testing (the evals, and run.py on a laptop). It turns the
+case's script into events and hands them to the bank's workflow
+(loans.workflow), which reacts as it would to a real customer: it gives the
+agent its tools, runs the bank's own steps, and the agent loop
+(loans.agent.graph) runs until it pauses or ends. In a real bank the events
+come from real customers, staff and the clock instead, and everything
+outside this file stays the same.
 
 It submits the application and starts the agent. Each time the agent stops
 without ending the case (to wait for the customer), it decides what happens
@@ -17,10 +25,8 @@ next, from the case's customer.json:
 A safety limit (MAX_PAUSES) stops the simulation if the agent keeps waiting
 without ending the case.
 
-When the agent completes the case, the simulation runs the bank's next
-steps, as the workflow would: the credit check (loans.services.credit_bureau)
-and, when it passes, the offer (loans.offers). Cancelled cases and cases
-sent to a human go no further. Time is simulated: the clock starts at the case's
+When the agent ends the case, the workflow runs the bank's next steps
+(loans.workflow.after_application). Time is simulated: the clock starts at the case's
 start time and moves one minute per tool call, plus the jumps above.
 
 A pause is the run stopping in the agent loop's wait box; the checkpointer
@@ -32,39 +38,31 @@ The agent reaches its tools in one of two ways:
 
 - Through the MCP server (mcp_url given), as in a real deployment. The store
   is then a PostgresStore, the bank's database, which the simulation uses as
-  the bank's workflow and customer portal would: it opens a session for the
-  case, hands the agent only the session's token, and closes the session at
-  the end, also if the run fails. The clock is the session's, shared with
-  the server.
+  the customer portal would; the workflow opens the case's session, and the
+  clock is the session's, shared with the server.
 - Directly (no mcp_url): the tools run inside this program, on the store
-  given (usually in memory), with a clock of its own. Quicker, and needs no
-  server or database.
+  given (usually in memory), with the simulation's own clock. Quicker, and
+  needs no server or database.
 
 The LLM sees the same tools either way, and the same rules apply.
 """
 
-from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage
-from langchain_core.tools import BaseTool
+from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.types import Command
 
 from loans import policy
-from loans.agent.graph import build_graph, thread_config
+from loans.agent.graph import build_graph, run_until_pause, thread_config
 from loans.agent.prompt import customer_reply_turn, first_turn, no_answer_turn
-from loans.agent.tools import make_tools
 from loans.checks.ending import last_contact
 from loans.evals.case import EvalCase, Reply, submit_case
-from loans.mcp.client import load_tools
-from loans.mcp.sessions import SessionClock, close_session, open_session
-from loans.offers import offer_for
-from loans.services.credit_bureau import check_credit
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore, CustomerReply
+from loans.workflow import after_application, open_case_for_agent
 
 # The most times the agent may stop to wait before the simulation gives up.
 MAX_PAUSES = 10
@@ -109,29 +107,6 @@ class SimulationResult:
     stopped_by_limit: bool
 
 
-Clock = SimulatedClock | SessionClock
-
-
-@asynccontextmanager
-async def _agent_tools(
-    store: ApplicationStore, application_id: str, start: datetime, mcp_url: str | None
-) -> AsyncGenerator[tuple[list[BaseTool], Clock]]:
-    """The agent's tools for the case and the case's clock: through the MCP
-    server if mcp_url is given, else directly."""
-    if mcp_url is None:
-        clock = SimulatedClock(start)
-        yield make_tools(store, application_id, clock), clock
-        return
-    # The workflow opens a session for this one case; the agent gets only its
-    # token, inside the tools.
-    conn = store.connection  # a PostgresStore: the server works on the same database
-    token = open_session(conn, application_id, start, store.agent)
-    try:
-        yield await load_tools(mcp_url, token), SessionClock(conn, token)
-    finally:
-        close_session(conn, token)
-
-
 async def simulate_case(
     case: EvalCase,
     store: ApplicationStore,
@@ -164,7 +139,9 @@ async def simulate_case(
     application_id = submit_case(store, case, application_id)
     thread_id = thread_id or application_id
     config = {**(config or {}), **thread_config(thread_id)}
-    async with _agent_tools(store, application_id, case.info.start_time, mcp_url) as (tools, clock):
+    start_time = case.info.start_time
+    tools_and_clock = open_case_for_agent(store, application_id, start_time, mcp_url, SimulatedClock(start_time))
+    async with tools_and_clock as (tools, clock):
         graph = build_graph(model, tools)
         replies = list(case.customer.replies)
         answered = 0  # how many of the agent's messages the customer has reacted to
@@ -177,14 +154,10 @@ async def simulate_case(
             on_message(start)
         run_input = {"messages": [start]}
         while True:
-            messages = await _run(graph, run_input, config, on_message, on_token)
+            messages = await run_until_pause(graph, run_input, config, on_message, on_token)
             stored = store.get(application_id)
             if stored.ending is not None:
-                if stored.ending.outcome == "complete":
-                    result = check_credit(stored.metadata, clock())
-                    store.record_credit_check(application_id, result)
-                    if result.passed:
-                        store.record_offer(application_id, offer_for(stored.raw), clock())
+                after_application(store, application_id, clock)
                 return SimulationResult(application_id, thread_id, messages, pauses, False)
             if pauses == max_pauses:
                 return SimulationResult(application_id, thread_id, messages, pauses, True)
@@ -204,34 +177,6 @@ async def simulate_case(
                 clock.jump_to((last_contact(stored) or clock()) + timedelta(days=days))
                 news = no_answer_turn(days, clock.now.date())
             run_input = Command(resume=news)  # continue the paused run with the news
-
-
-async def _run(graph, run_input, config: dict, on_message, on_token) -> list[BaseMessage]:
-    """Run until the next pause or the end, and return the whole conversation.
-    With on_message or on_token, the run is streamed: finished messages step
-    by step ("updates"), and the model's words as it writes them
-    ("messages")."""
-    if on_message is None and on_token is None:
-        await graph.ainvoke(run_input, config)
-        return (await graph.aget_state(config)).values["messages"]
-
-    modes = ["updates", "messages"] if on_token else ["updates"]
-    async for mode, data in graph.astream(run_input, config, stream_mode=modes):
-        if mode == "messages":
-            chunk, _ = data
-            if isinstance(chunk, AIMessageChunk):
-                thinking = chunk.additional_kwargs.get("reasoning_content")
-                if thinking:
-                    on_token("thinking", thinking)
-                if isinstance(chunk.content, str) and chunk.content:
-                    on_token("answer", chunk.content)
-        elif on_message:
-            for node, values in data.items():
-                if node.startswith("__"):  # for example __interrupt__: the pause itself
-                    continue
-                for message in (values or {}).get("messages", []):
-                    on_message(message)
-    return (await graph.aget_state(config)).values["messages"]
 
 
 def _apply_reply(
