@@ -1,4 +1,4 @@
-"""search_loan_terms: the offer agent's tool for looking things up (RAG) in
+"""retrieve_documents: the offer agent's tool for looking things up (RAG) in
 the bank's loan terms and FAQ and in the CFPB's consumer answers, to answer
 the customer's questions about the loan.
 
@@ -16,7 +16,7 @@ tampered document could contain a fake end marker; the planned
 poisoned-document attack measures what such a section can do.
 
 Each search is kept on file (the query, the time and the sections returned)
-and logged as terms_searched with the sections returned, never the query.
+and logged as documents_retrieved with the sections returned, never the query.
 Refused before the case has an offer and once the offer phase has closed. A
 retry (same call ID) searches again but is not recorded twice. A broken index
 (loans.rag.search.IndexNotReady) is a system error and is not caught here.
@@ -29,7 +29,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from loans.rag.search import SearchResult
-from loans.store import ApplicationStore, TermsSearch
+from loans.store import ApplicationStore, DocumentRetrieval
 
 # A limit on the query's length: a search, not a letter. (The customer's
 # messages have their own limit, when they are shown to the agent.)
@@ -43,7 +43,7 @@ HEADER = (
 )
 
 
-def search_loan_terms(
+def retrieve_documents(
     store: ApplicationStore,
     application_id: str,
     now: datetime,
@@ -53,22 +53,22 @@ def search_loan_terms(
 ) -> str:
     """Search the bank's terms and the CFPB's answers; return the closest sections."""
     stored = store.get(application_id)
-    if refusal := store.refuse_if_offer_closed(application_id, now, "search_loan_terms"):
+    if refusal := store.refuse_if_offer_closed(application_id, now, "retrieve_documents"):
         return refusal
     problem = _problem(query)
     if problem:
         store.log_event(
-            application_id, now, "guardrail", "action_blocked", f"search_loan_terms: {problem}"
+            application_id, now, "guardrail", "action_blocked", f"retrieve_documents: {problem}"
         )
-        return f"not searched: {problem}"
+        return f"not retrieved: {problem}"
 
     results = search(query)
-    if all(earlier.search_id != call_id for earlier in stored.terms_searches):
-        store.record_terms_search(
+    if all(earlier.retrieval_id != call_id for earlier in stored.document_retrievals):
+        store.record_document_retrieval(
             application_id,
-            TermsSearch(
-                search_id=call_id,
-                searched_at=now,
+            DocumentRetrieval(
+                retrieval_id=call_id,
+                retrieved_at=now,
                 query=query,
                 chunk_ids=[r.chunk_id for r in results],
             ),

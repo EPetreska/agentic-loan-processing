@@ -1,4 +1,4 @@
-"""Tests for the offer agent's search_loan_terms tool, with a stand-in for
+"""Tests for the offer agent's retrieve_documents tool, with a stand-in for
 the search (the search itself is tested in test_rag_search.py)."""
 
 from datetime import timedelta
@@ -10,7 +10,7 @@ from loans.evals.case import load_case, submit_case
 from loans.offers import offer_for
 from loans.rag.search import IndexNotReady, SearchResult
 from loans.store import ApplicationStore, OfferClosing
-from loans.tools.offer.search_loan_terms import HEADER, MAX_QUERY_LENGTH, search_loan_terms
+from loans.tools.offer.retrieve_documents import HEADER, MAX_QUERY_LENGTH, retrieve_documents
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 QUERY = "late fee for a missed payment"
@@ -43,7 +43,7 @@ def offered():
 
 def ask(store, app_id, case, query=QUERY, call_id="call-1", search=None):
     now = case.info.start_time + timedelta(days=1)
-    return search_loan_terms(store, app_id, now, call_id, query, search or FakeSearch())
+    return retrieve_documents(store, app_id, now, call_id, query, search or FakeSearch())
 
 
 def test_the_sections_are_shown_as_data_with_their_sources(offered):
@@ -61,15 +61,15 @@ def test_the_sections_are_shown_as_data_with_their_sources(offered):
 def test_the_search_is_kept_on_file(offered):
     store, app_id, case = offered
     ask(store, app_id, case)
-    [search] = store.get(app_id).terms_searches
-    assert (search.search_id, search.query, search.chunk_ids) == ("call-1", QUERY, ["bank-06", "cfpb-839-1"])
+    [search] = store.get(app_id).document_retrievals
+    assert (search.retrieval_id, search.query, search.chunk_ids) == ("call-1", QUERY, ["bank-06", "cfpb-839-1"])
 
 
 def test_the_log_names_the_sections_never_the_query(offered):
     store, app_id, case = offered
     ask(store, app_id, case)
     event = store.get(app_id).audit_log[-1]
-    assert (event.actor, event.event, event.details) == ("agent", "terms_searched", "bank-06, cfpb-839-1")
+    assert (event.actor, event.event, event.details) == ("agent", "documents_retrieved", "bank-06, cfpb-839-1")
     assert QUERY not in event.model_dump_json()
 
 
@@ -77,7 +77,7 @@ def test_a_retry_is_not_recorded_twice(offered):
     store, app_id, case = offered
     first = ask(store, app_id, case)
     assert ask(store, app_id, case) == first
-    assert len(store.get(app_id).terms_searches) == 1
+    assert len(store.get(app_id).document_retrievals) == 1
 
 
 def test_a_section_is_shown_exactly_as_stored(offered):
@@ -99,8 +99,8 @@ def test_a_section_is_shown_exactly_as_stored(offered):
 def test_a_bad_query_is_refused_without_searching(offered, query, problem):
     store, app_id, case = offered
     search = FakeSearch()
-    assert ask(store, app_id, case, query=query, search=search) == f"not searched: {problem}"
-    assert search.queries == [] and store.get(app_id).terms_searches == []
+    assert ask(store, app_id, case, query=query, search=search) == f"not retrieved: {problem}"
+    assert search.queries == [] and store.get(app_id).document_retrievals == []
 
 
 def test_no_search_before_there_is_an_offer():
@@ -114,7 +114,7 @@ def test_no_search_after_the_offer_phase_closed(offered):
     store, app_id, case = offered
     store.record_offer_closing(app_id, OfferClosing(outcome="expired", closed_at=case.info.start_time))
     assert ask(store, app_id, case) == "not done: the offer phase has closed (expired)"
-    assert store.get(app_id).terms_searches == []
+    assert store.get(app_id).document_retrievals == []
 
 
 def test_a_broken_index_is_a_system_error(offered):

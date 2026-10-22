@@ -144,15 +144,15 @@ class ApprovalRequest(BaseModel):
     officer_note: str | None = None
 
 
-class TermsSearch(BaseModel):
+class DocumentRetrieval(BaseModel):
     """A search of the bank's terms and the CFPB's answers by the offer
     agent, kept on file so a reviewer can see what it searched for and what
     it got back. The query is kept here, not in the audit log, like the text
     of a message."""
 
     # The ID of the tool call, so a retried search is not recorded twice.
-    search_id: str
-    searched_at: datetime
+    retrieval_id: str
+    retrieved_at: datetime
     # What the agent searched for, in its own words.
     query: str
     # The sections returned, closest first.
@@ -225,7 +225,7 @@ class StoredApplication(BaseModel):
     approval_requests: list[ApprovalRequest] = []
     # The offer agent's searches of the bank's terms and the CFPB's answers,
     # oldest first.
-    terms_searches: list[TermsSearch] = []
+    document_retrievals: list[DocumentRetrieval] = []
     # Set once the offer phase has closed. The offer agent's tools refuse
     # from then on, as the application agent's do after its ending.
     offer_closing: OfferClosing | None = None
@@ -439,16 +439,16 @@ class ApplicationStore:
                 request.reason,
             )
 
-    def record_terms_search(self, application_id: str, search: TermsSearch) -> None:
+    def record_document_retrieval(self, application_id: str, search: DocumentRetrieval) -> None:
         """Keep the search on file and log it, in one step. The log names the
         sections returned, never the query."""
         with self._changing(application_id) as stored:
-            stored.terms_searches.append(search)
+            stored.document_retrievals.append(search)
             self.log_event(
                 application_id,
-                search.searched_at,
+                search.retrieved_at,
                 "agent",
-                "terms_searched",
+                "documents_retrieved",
                 ", ".join(search.chunk_ids),
             )
 

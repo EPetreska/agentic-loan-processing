@@ -55,7 +55,7 @@ EventName = Literal[
     "approval_decided",
     # the offer agent (it also uses message_sent)
     "approval_requested",
-    "terms_searched",
+    "documents_retrieved",
 ]
 
 
