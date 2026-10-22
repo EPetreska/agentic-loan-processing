@@ -70,10 +70,15 @@ def make_model(spec: str) -> BaseChatModel:
 def thread_config(case_thread: str, agent: Literal["application", "offer"]) -> dict:
     """The run settings that point LangGraph at one agent's saved
     conversation on one case (case_thread is usually the application ID).
-    Each agent has its own thread, for example "app-123/offer": both agents
+    Each agent has its own thread, for example "app-123__offer": both agents
     work on the same case, and with a shared checkpointer one thread would
-    make the offer agent continue the application agent's conversation."""
-    return {"configurable": {"thread_id": f"{case_thread}/{agent}"}}
+    make the offer agent continue the application agent's conversation.
+
+    The thread ID never contains "/": LangGraph passes it to LangSmith, whose
+    thread page puts it in a web address, and a "/" there breaks the page."""
+    if "/" in case_thread:
+        raise ValueError(f"a thread name cannot contain '/': {case_thread!r}")
+    return {"configurable": {"thread_id": f"{case_thread}__{agent}"}}
 
 
 def build_graph(

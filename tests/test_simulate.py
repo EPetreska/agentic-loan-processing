@@ -223,12 +223,12 @@ def test_the_thread_is_the_case_unless_given():
     store = ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
     default = run_simulation(case, store, FakeModel(messages=iter(MARIA)))
-    assert default.thread_id == "02_maria_job_change/application"
+    assert default.thread_id == "02_maria_job_change__application"
     store = ApplicationStore()
     given = run_simulation(
-        case, store, FakeModel(messages=iter(MARIA)), thread_id="2026-10-21T04-25-37/02"
+        case, store, FakeModel(messages=iter(MARIA)), thread_id="2026-10-21T04-25-37__02"
     )
-    assert given.thread_id == "2026-10-21T04-25-37/02/application"
+    assert given.thread_id == "2026-10-21T04-25-37__02__application"
     assert store.get(given.application_id).ending.outcome == "complete"  # resumes still work
 
 
@@ -292,7 +292,7 @@ def test_after_the_signature_the_offer_agents_run_is_ended_without_the_llm():
 def test_each_agent_keeps_its_own_conversation():
     _, _, _, result = full_flow()
     assert (result.thread_id, result.offer_thread_id) == (
-        "05_maria_asks_and_signs/application", "05_maria_asks_and_signs/offer"
+        "05_maria_asks_and_signs__application", "05_maria_asks_and_signs__offer"
     )
     assert "A new loan application has been submitted" in result.messages[0].content
     assert all("A new loan application" not in m.content for m in result.offer_messages)
@@ -502,7 +502,7 @@ def test_a_case_can_start_at_the_offer_phase():
     assert (result.thread_id, result.messages, result.pauses) == (None, [], 0)
     assert stored.offer_closing.outcome == case.info.expected.offer_outcome == "accepted"
     assert [m.text for m in stored.messages] == [LATE_FEE_ANSWER]
-    assert result.offer_thread_id == "09_offer_late_fee_question/offer"
+    assert result.offer_thread_id == "09_offer_late_fee_question__offer"
 
 
 def test_the_setup_is_logged_as_setup_not_as_an_agents_work():

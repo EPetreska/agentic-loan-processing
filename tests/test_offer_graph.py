@@ -6,6 +6,7 @@ import asyncio
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -133,3 +134,11 @@ def test_each_agent_keeps_its_own_conversation_on_a_case():
     config = start(offer, app_id, "Thanks.")
     messages = offer.get_state(config).values["messages"]
     assert len(messages) == 2 and "The customer wrote" in messages[0].content
+
+
+def test_a_thread_name_never_contains_a_slash():
+    # LangSmith's thread page breaks on a "/" in the thread ID.
+    for agent in ["application", "offer"]:
+        assert "/" not in thread_config("02_maria_job_change@2026-10-22T18-32-08", agent)["configurable"]["thread_id"]
+    with pytest.raises(ValueError, match="cannot contain '/'"):
+        thread_config("runs/02", "offer")

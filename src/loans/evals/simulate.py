@@ -170,7 +170,7 @@ async def simulate_case(
 
     thread_id names the case's part of the checkpointer thread that keeps
     the conversation (default: the application ID; the application agent's
-    thread is then "<thread_id>/application"). LangGraph also passes it to LangSmith,
+    thread is then "<thread_id>__application"). LangGraph also passes it to LangSmith,
     which groups the traces of one thread, so it must differ between runs:
     otherwise every run of the same case would end up in one thread. run.py
     gives each run's case its own application ID, so the default does.
