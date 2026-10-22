@@ -10,6 +10,7 @@ from loans.agents.offer.prompt import (
     PROMPT_VERSION,
     SYSTEM_PROMPT,
     build_system_prompt,
+    closed_turn,
     customer_message_turn,
     first_turn,
     officer_decision_turn,
@@ -62,7 +63,7 @@ def test_prompt_version_is_a_fingerprint_of_the_text():
 
 
 @pytest.mark.parametrize(
-    "turn", ["SYSTEM_PROMPT", "first_turn", "customer_message_turn", "officer_decision_turn"]
+    "turn", ["SYSTEM_PROMPT", "first_turn", "customer_message_turn", "officer_decision_turn", "closed_turn"]
 )
 def test_prompt_version_changes_with_what_the_agent_is_told(monkeypatch, turn):
     reworded = "reworded" if turn == "SYSTEM_PROMPT" else (lambda *args: "reworded")
@@ -110,4 +111,14 @@ def test_a_decline():
     assert officer_decision_turn("declined", DAY) == (
         "Today is 2026-09-20. A loan officer declined the customer's request. "
         "The offer sent earlier still stands."
+    )
+
+
+def test_closed_turn():
+    assert closed_turn("accepted", DAY) == (
+        "Today is 2026-09-20. The offer phase has closed: the customer signed the offer, "
+        "which accepts it."
+    )
+    assert closed_turn("expired", DAY) == (
+        "Today is 2026-09-20. The offer phase has closed: the offer expired without a signature."
     )

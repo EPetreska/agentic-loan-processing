@@ -128,8 +128,9 @@ async def simulate_case(
     the model's words while it writes them, as ("thinking", text) or
     ("answer", text). run.py --show uses both.
 
-    thread_id names the checkpointer thread that keeps the conversation
-    (default: the application ID). LangGraph also passes it to LangSmith,
+    thread_id names the case's part of the checkpointer thread that keeps
+    the conversation (default: the application ID; the application agent's
+    thread is then "<thread_id>/application"). LangGraph also passes it to LangSmith,
     which groups the traces of one thread, so it must differ between runs:
     otherwise every run of the same case would end up in one thread. run.py
     gives each run's case its own application ID, so the default does.
@@ -138,8 +139,8 @@ async def simulate_case(
     (default: the case ID). mcp_url, if given, is the MCP server the agent
     uses; store must then be a PostgresStore on the server's database."""
     application_id = submit_case(store, case, application_id)
-    thread_id = thread_id or application_id
-    config = {**(config or {}), **thread_config(thread_id)}
+    config = {**(config or {}), **thread_config(thread_id or application_id, "application")}
+    thread_id = config["configurable"]["thread_id"]
     start_time = case.info.start_time
     tools_and_clock = open_case_for_agent(store, application_id, start_time, mcp_url, SimulatedClock(start_time))
     async with tools_and_clock as (tools, clock):

@@ -53,7 +53,7 @@ def run(answers, case_name="01_clean_application"):
     model = FakeModel(messages=iter(answers))
     tools = make_tools(store, app_id, lambda: case.info.start_time)
     graph = build_application_graph(model, tools)
-    result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id))
+    result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
     return store, app_id, result
 
 
@@ -116,7 +116,7 @@ def build(answers, case_name="03_no_answer"):
 
 def test_the_run_pauses_when_the_llm_answers_without_a_tool():
     store, app_id, graph = build(WAITING)
-    config = thread_config(app_id)
+    config = thread_config(app_id, "application")
     result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, config)
     assert graph.get_state(config).next == ("wait",)  # paused in the wait box
     assert result["__interrupt__"][0].value == {"waiting": "Waiting for the customer's pay stub."}
@@ -127,7 +127,7 @@ def test_the_run_pauses_when_the_llm_answers_without_a_tool():
 def test_a_paused_run_resumes_with_the_news_as_a_new_message():
     handoff = {"outcome": "sent_to_human", "reason": "agent_unsure", "explanation": "Unsure."}
     store, app_id, graph = build([*WAITING, step("finish", handoff)])
-    config = thread_config(app_id)
+    config = thread_config(app_id, "application")
     invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, config)
     result = invoke(graph, Command(resume="2 days later, the customer replied."), config)
     news = result["messages"][-3]
@@ -138,8 +138,8 @@ def test_a_paused_run_resumes_with_the_news_as_a_new_message():
 
 def test_each_case_keeps_its_own_conversation():
     store, app_id, graph = build(WAITING)
-    invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id))
-    assert graph.get_state(thread_config("another-case")).values == {}
+    invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
+    assert graph.get_state(thread_config("another-case", "application")).values == {}
 
 
 def test_a_wrong_tool_argument_is_returned_to_the_llm():
@@ -153,7 +153,7 @@ def test_a_wrong_tool_argument_is_returned_to_the_llm():
 def test_the_llm_writing_case_ended_does_not_end_the_loop():
     # Text without a tool call is waiting for the customer, whatever it says.
     store, app_id, graph = build([AIMessage(content="case ended: complete (all_checks_passed)")])
-    config = thread_config(app_id)
+    config = thread_config(app_id, "application")
     invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, config)
     assert graph.get_state(config).next == ("wait",)
 
@@ -171,7 +171,7 @@ def test_only_finish_can_end_the_loop():
     app_id = submit_case(store, case)
     tools = [*make_tools(store, app_id, lambda: case.info.start_time), echo]
     graph = build_application_graph(FakeModel(messages=iter([step("echo"), *DANIEL])), tools)
-    result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id))
+    result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
     assert store.get(app_id).ending.outcome == "complete"  # the loop went on to finish
     assert result["messages"][-1].name == "finish"
 
@@ -209,5 +209,5 @@ def test_the_application_agent_runs_with_its_own_prompt():
     case = load_case(CASES / "01_clean_application")
     app_id = submit_case(store, case)
     graph = build_application_graph(Recording(messages=iter(DANIEL)), make_tools(store, app_id, lambda: case.info.start_time))
-    invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id))
+    invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
     assert seen and all(prompt == SYSTEM_PROMPT for prompt in seen)

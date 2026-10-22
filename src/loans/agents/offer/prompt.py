@@ -12,7 +12,7 @@ code (loans.offers.offer_notice), so it is shown as it is; the customer's
 text is quoted as untrusted data.
 
 PROMPT_VERSION is a short fingerprint of the system prompt and the wording of
-the messages that start and resume the agent, recorded with every agent event
+the messages that start, resume and end the agent, recorded with every agent event
 in the audit log.
 """
 
@@ -154,6 +154,19 @@ def officer_decision_turn(
     )
 
 
+def closed_turn(outcome: Literal["accepted", "expired"], today: date) -> str:
+    """The message that ends the agent's run once the workflow has closed
+    the offer phase. The agent never acts on it (the run ends without
+    calling the LLM); it is kept as the conversation's last message, so the
+    conversation shows how the case ended."""
+    how = (
+        "the customer signed the offer, which accepts it"
+        if outcome == "accepted"
+        else "the offer expired without a signature"
+    )
+    return f"{_today(today)} The offer phase has closed: {how}."
+
+
 def _fingerprint() -> str:
     """A short fingerprint of everything the agent is told (the turn
     messages rendered with sample values, since only their wording is fixed)."""
@@ -164,6 +177,8 @@ def _fingerprint() -> str:
         customer_message_turn(1, "sample", day),
         officer_decision_turn("approved", day, "sample"),
         officer_decision_turn("declined", day),
+        closed_turn("accepted", day),
+        closed_turn("expired", day),
     ]
     return hashlib.sha256("\n\n".join(texts).encode()).hexdigest()[:8]
 

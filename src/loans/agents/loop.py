@@ -6,9 +6,12 @@ The LLM chooses a tool, the tool runs, the LLM sees the result and chooses
 the next step. When the LLM replies without calling a tool (for example to
 wait for the customer), the run pauses in the wait box (LangGraph's
 interrupt), and the checkpointer saves the conversation under the case's
-thread ID (the application ID). The caller resumes it later with what
-happened in the meantime (the customer's reply, or time passing), which the
-agent receives as a new message. Whether the loop ends after a tool step is
+thread ID (one per case and agent). The caller resumes it later with what
+happened in the meantime (the customer's reply, time passing, or a loan
+officer's decision), which the agent receives as a new message. A paused
+run can also be ended by its caller (end_run), without calling the LLM, when
+the work it waits for is over (the offer agent's run, once the offer phase
+has closed); its closing message is kept as the last message. Whether the loop ends after a tool step is
 the agent's own stopping rule (the application agent stops when finish
 answers that the case ended).
 
@@ -25,6 +28,7 @@ Which model runs is a setting (LLM_MODEL, for example "ollama:qwen3:4b" or
 """
 
 from collections.abc import Callable
+from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage, SystemMessage
@@ -34,7 +38,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 
 
 # The context window for local Ollama models, in tokens. Ollama otherwise uses
@@ -63,9 +67,13 @@ def make_model(spec: str) -> BaseChatModel:
     raise ValueError(f"unknown model setting {spec!r}, expected 'ollama:<name>' or 'anthropic:<name>'")
 
 
-def thread_config(application_id: str) -> dict:
-    """The run settings that point LangGraph at one case's saved conversation."""
-    return {"configurable": {"thread_id": application_id}}
+def thread_config(case_thread: str, agent: Literal["application", "offer"]) -> dict:
+    """The run settings that point LangGraph at one agent's saved
+    conversation on one case (case_thread is usually the application ID).
+    Each agent has its own thread, for example "app-123/offer": both agents
+    work on the same case, and with a shared checkpointer one thread would
+    make the offer agent continue the application agent's conversation."""
+    return {"configurable": {"thread_id": f"{case_thread}/{agent}"}}
 
 
 def build_graph(
@@ -88,12 +96,14 @@ def build_graph(
     def after_agent(state: MessagesState) -> str:
         return "tools" if state["messages"][-1].tool_calls else "wait"
 
-    def wait(state: MessagesState) -> dict:
+    def wait(state: MessagesState) -> Command:
         # Pauses the run here. When it is resumed, interrupt returns what the
         # caller passed in (Command(resume=...)), and the agent gets it as a
-        # new message.
+        # new message; a closing (end_run) is kept and ends the run instead.
         news = interrupt({"waiting": state["messages"][-1].content})
-        return {"messages": [HumanMessage(news)]}
+        if isinstance(news, dict) and _CLOSING in news:
+            return Command(update={"messages": [HumanMessage(news[_CLOSING])]}, goto=END)
+        return Command(update={"messages": [HumanMessage(news)]}, goto="agent")
 
     def after_tools(state: MessagesState) -> str:
         return END if ends_after_tools(state["messages"]) else "agent"
@@ -103,12 +113,22 @@ def build_graph(
     # A tool call the LLM gets wrong (for example an unknown slot) is returned
     # to it as an error message, so it can correct itself.
     graph.add_node("tools", ToolNode(tools))
-    graph.add_node("wait", wait)
+    graph.add_node("wait", wait, destinations=("agent", END))
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", after_agent, ["tools", "wait"])
     graph.add_conditional_edges("tools", after_tools, ["agent", END])
-    graph.add_edge("wait", "agent")
     return graph.compile(checkpointer=checkpointer or InMemorySaver())
+
+
+# The key that marks a resume as a closing. A plain dict, not a class, so a
+# database checkpointer can save it like any other resume value.
+_CLOSING = "closing"
+
+
+def end_run(closing: str) -> Command:
+    """What ends a paused run instead of resuming it: the closing message is
+    added to the conversation, and the run ends without calling the LLM."""
+    return Command(resume={_CLOSING: closing})
 
 
 async def run_until_pause(

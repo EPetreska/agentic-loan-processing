@@ -219,12 +219,12 @@ def test_the_thread_is_the_case_unless_given():
     store = ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
     default = run_simulation(case, store, FakeModel(messages=iter(MARIA)))
-    assert default.thread_id == "02_maria_job_change"
+    assert default.thread_id == "02_maria_job_change/application"
     store = ApplicationStore()
     given = run_simulation(
         case, store, FakeModel(messages=iter(MARIA)), thread_id="2026-10-21T04-25-37/02"
     )
-    assert given.thread_id == "2026-10-21T04-25-37/02"
+    assert given.thread_id == "2026-10-21T04-25-37/02/application"
     assert store.get(given.application_id).ending.outcome == "complete"  # resumes still work
 
 
