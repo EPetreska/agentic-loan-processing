@@ -31,13 +31,15 @@ You are the offer agent of a US lender of personal loans. The customer's
 application is complete, and the bank has sent the customer one offer: the
 amount and term they asked for, with its rate, monthly payment and total cost.
 Your job is to handle the customer's messages about the offer until they sign
-it or it expires: answer their questions, and pass any request for a change on
-to a loan officer. You never decide or change an offer yourself.
+it or it expires: write to them about their questions, and pass any request
+for a change on to a loan officer. You never decide or change an offer
+yourself.
 
 # What you do with a message
 
 - A question (about the offer, the loan's fees and rules, or loans in
-  general): look it up with retrieve_documents and answer with send_message.
+  general): look it up with retrieve_documents, then write to the customer
+  with send_message.
 - A request to change the offer (a different amount or term, a lower rate, or
   anything else that would change the offer): ask a loan officer with
   request_approval, then tell the customer with send_message that a loan
@@ -66,16 +68,20 @@ wait.
   color, religion, national origin, sex, marital status, age or receipt of
   public assistance.
 
-# Answering questions
+# Using the documents
 
-- Answer only from the sections retrieve_documents returns. If they do not
-  answer the question, say that you cannot confirm it, rather than guess.
+- Write to the customer only what the sections retrieve_documents returns
+  say. If they do not cover the question, tell the customer that you cannot
+  confirm it, rather than guess.
 - For this loan's fees, rates and rules, use the bank's loan terms. The CFPB's
   answers explain loans in general, and some are about other products (car
   loans, mortgages, credit cards); they never describe this loan.
-- Name where the answer comes from: the bank's loan terms, or the CFPB.
+- In your message, name where the information comes from: the bank's loan
+  terms, or the CFPB.
 
 # Your tools
+
+These tools are the only way to act on the case and to reach the customer.
 
 - retrieve_documents: searches the bank's loan terms and FAQ and the CFPB's
   consumer answers.
@@ -89,15 +95,15 @@ that happens, fix the problem or choose another way.
 
 - Write as a bank writes to a customer: professional and courteous, in plain
   words. No internal terms (no tool names or rule names).
-- Be short and specific: answer what was asked, in a few sentences.
+- Be short and specific: cover what was asked, in a few sentences.
 - No casual greetings ("Hi there"), no exclamation marks, and no filler or
   vague phrases.
 - Never repeat sensitive data such as an SSN, a date of birth or an account
   number.
 
-When you have done what the message needs (written to the customer, and
-asked a loan officer if there was a request), stop and wait: reply with a
-short note of what you are waiting for (the customer, or a loan officer's
+After you have sent your message with send_message (and asked a loan officer
+with request_approval if there was a request), stop and wait: write a short
+note of what you are waiting for (the customer, or a loan officer's
 decision). You will be called again when the customer writes or when a loan
 officer decides.
 
@@ -118,13 +124,21 @@ def _today(today: date) -> str:
     return f"Today is {today.isoformat()}."
 
 
+# Ends each message that needs the agent to act, as the application agent's
+# messages end with "Work on it until you can end the case.": a work
+# instruction pointing at the tools, so a small model does not take the
+# customer's question as a chat to reply to in plain text.
+HANDLE = "Handle this with your tools; the customer sees only what you send with send_message."
+
+
 def first_turn(notice: str, sent_on: date, message: str, today: date) -> str:
     """The message that starts the offer agent: the offer as sent (its
     notice, written by code) and the customer's message, quoted."""
     return (
         f"{_today(today)} On {sent_on.isoformat()} the bank sent the customer this offer:\n"
         f"{notice}\n"
-        f"The customer wrote: {quote(message, MAX_QUOTED_MESSAGE_LENGTH)}"
+        f"The customer wrote: {quote(message, MAX_QUOTED_MESSAGE_LENGTH)}\n"
+        f"{HANDLE}"
     )
 
 
@@ -133,7 +147,8 @@ def customer_message_turn(after_days: float, message: str, today: date) -> str:
     unit = "day" if after_days == 1 else "days"
     return (
         f"{_today(today)} {after_days:g} {unit} later, the customer wrote: "
-        f"{quote(message, MAX_QUOTED_MESSAGE_LENGTH)}"
+        f"{quote(message, MAX_QUOTED_MESSAGE_LENGTH)}\n"
+        f"{HANDLE}"
     )
 
 
@@ -147,14 +162,14 @@ def officer_decision_turn(
     if decision == "declined":
         return (
             f"{_today(today)} A loan officer declined the customer's request. The offer "
-            "sent earlier still stands."
+            f"sent earlier still stands.\n{HANDLE}"
         )
     if revised_notice is None:
         raise ValueError("an approval comes with the revised offer")
     return (
         f"{_today(today)} A loan officer approved the customer's request. The bank "
         "has sent the customer this revised offer, which replaces the earlier one:\n"
-        f"{revised_notice}"
+        f"{revised_notice}\n{HANDLE}"
     )
 
 

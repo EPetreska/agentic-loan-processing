@@ -2,8 +2,8 @@
 parameters.
 
 Shared by both ways the offer agent can reach its tools: directly
-(loans.agents.offer.tools) and, later, through the MCP server, so the two
-cannot drift apart. They say how each tool behaves; what the agent should do
+(loans.agents.offer.tools) and through the MCP server (loans.mcp.server), so
+the two cannot drift apart. They say how each tool behaves; what the agent should do
 is in its prompt. Numbers come from the code, so a description cannot drift
 from the real limit. The message texts are the application agent's, since
 both agents write to the customer under the same rules.
