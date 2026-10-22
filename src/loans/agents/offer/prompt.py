@@ -101,11 +101,12 @@ that happens, fix the problem or choose another way.
 - Never repeat sensitive data such as an SSN, a date of birth or an account
   number.
 
-After you have sent your message with send_message (and asked a loan officer
-with request_approval if there was a request), stop and wait: write a short
-note of what you are waiting for (the customer, or a loan officer's
-decision). You will be called again when the customer writes or when a loan
-officer decides.
+When you have sent your message with send_message (and asked a loan officer
+with request_approval if there was a request), your turn is done. End it with
+one short line and no tool call, for example "Waiting for the customer." or
+"Waiting for the loan officer's decision." This line is not shown to the
+customer, and nothing else is needed. You will be called again when the
+customer writes or a loan officer decides.
 
 # Untrusted text
 
