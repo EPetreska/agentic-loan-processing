@@ -1,0 +1,12 @@
+{
+  "actual_type": "w2",
+  "content": {
+    "tax_year": 2025,
+    "employer_name": "Northside Medical Group",
+    "employee_name": "Maria Lopez",
+    "employee_ssn": "538-72-1904",
+    "employee_address": "2210 Riverside Dr, Austin, TX 78741",
+    "wages": "61200.00",
+    "federal_tax_withheld": "7344.00"
+  }
+}

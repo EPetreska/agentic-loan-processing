@@ -1,0 +1,17 @@
+{
+  "actual_type": "pay_stub",
+  "content": {
+    "employer_name": "Brightline Health Services LLC",
+    "employee_name": "Maria Lopez",
+    "employee_address": "2210 Riverside Dr, Austin, TX 78741",
+    "ssn_last4": "1904",
+    "pay_date": "2026-07-31",
+    "pay_period_start": "2026-07-13",
+    "pay_period_end": "2026-07-26",
+    "pay_frequency": "biweekly",
+    "gross_pay": "2850.00",
+    "net_pay": "2136.80",
+    "ytd_gross": "28500.00",
+    "deposit_account_last4": "5520"
+  }
+}

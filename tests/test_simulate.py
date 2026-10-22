@@ -15,7 +15,9 @@ from langchain_core.messages import AIMessage
 from conftest import AGENT
 from loans.db.postgres_store import PostgresStore
 from loans.evals.case import load_case
+from loans.agents.offer import prompt as offer_prompt
 from loans.evals.simulate import SimulatedClock, simulate_case
+from loans.rag.search import SearchResult
 from loans.store import ApplicationStore
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
@@ -226,6 +228,84 @@ def test_the_thread_is_the_case_unless_given():
     )
     assert given.thread_id == "2026-10-21T04-25-37/02/application"
     assert store.get(given.application_id).ending.outcome == "complete"  # resumes still work
+
+
+# The offer phase: case 05 goes on after the application. Both agents run on
+# the same fake LLM, one after the other, with a fake document search.
+
+SECTION = SearchResult(chunk_id="bank-07", document="bank", title="Paying early",
+                       text="No prepayment penalty.", source="the bank's own document", distance=0.1)  # fmt: skip
+ANSWER = "There is no fee for paying the loan off early, according to the bank's loan terms."
+OFFER_AGENT = [
+    step("retrieve_documents", {"query": "prepayment penalty"}, "o1"),
+    step("send_message", {"text": ANSWER, "reason": "She asked about paying early."}, "o2"),
+    wait(),
+]
+
+
+def full_flow(answers=MARIA + OFFER_AGENT, search=lambda query: [SECTION], **kwargs):
+    store = ApplicationStore()
+    case = load_case(CASES / "05_maria_asks_and_signs")
+    result = run_simulation(case, store, FakeModel(messages=iter(answers)), search=search, **kwargs)
+    return store, case, store.get(result.application_id), result
+
+
+def test_the_full_flow_ends_with_the_offer_signed():
+    _, case, stored, result = full_flow()
+    assert stored.ending.outcome == "complete"
+    assert [r.chunk_ids for r in stored.document_retrievals] == [["bank-07"]]
+    assert stored.messages[-1].text == ANSWER
+    assert stored.offer_closing.outcome == case.info.expected.offer_outcome == "accepted"
+    assert stored.signature.offer_index == 0
+    events = [e.event for e in stored.audit_log]
+    offer_part = events[events.index("offer_sent"):]
+    assert offer_part == [
+        "offer_sent", "customer_replied", "documents_retrieved", "message_sent", "offer_signed", "offer_closed"
+    ]  # fmt: skip
+
+
+def test_the_question_and_the_signature_come_when_the_script_says():
+    _, _, stored, _ = full_flow()
+    sent_at = stored.offers_sent[0].sent_at
+    question = stored.replies[-1]
+    assert question.message == "Is there a fee if I pay off the loan early?"
+    assert question.received_at == sent_at + timedelta(days=1)
+    assert stored.signature.signed_at == stored.messages[-1].sent_at + timedelta(days=2)
+
+
+def test_the_offer_agent_starts_with_the_offer_and_the_question():
+    _, _, stored, result = full_flow()
+    first = result.offer_messages[0].content
+    assert "the bank sent the customer this offer" in first
+    assert stored.offers_sent[0].notice in first
+    assert '"Is there a fee if I pay off the loan early?"' in first
+
+
+def test_after_the_signature_the_offer_agents_run_is_ended_without_the_llm():
+    # The fake LLM has no answer left after OFFER_AGENT: a further call would fail.
+    _, _, stored, result = full_flow()
+    assert result.offer_messages[-1].content == offer_prompt.closed_turn("accepted", stored.signature.signed_at.date())
+
+
+def test_each_agent_keeps_its_own_conversation():
+    _, _, _, result = full_flow()
+    assert (result.thread_id, result.offer_thread_id) == (
+        "05_maria_asks_and_signs/application", "05_maria_asks_and_signs/offer"
+    )
+    assert "A new loan application has been submitted" in result.messages[0].content
+    assert all("A new loan application" not in m.content for m in result.offer_messages)
+
+
+def test_the_offer_agent_needs_the_document_search():
+    with pytest.raises(ValueError, match="document search"):
+        full_flow(search=None)
+
+
+def test_a_case_without_an_offer_phase_stops_after_the_application():
+    store, _, result = simulate("02_maria_job_change", MARIA)
+    stored = store.get(result.application_id)
+    assert len(stored.offers_sent) == 1 and stored.offer_closing is None
+    assert (result.offer_thread_id, result.offer_messages) == (None, [])
 
 
 # Through the MCP server: the agent's tools are the server's, and the case is

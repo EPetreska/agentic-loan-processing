@@ -8,7 +8,8 @@ A case is a folder:
       documents/        one UploadedDocument per upload, named after its slot
                         (pay_stub.json, id_front.json, ...), plus documents the
                         customer uploads later (for example pay_stub_new.json)
-      customer.json     how the scripted customer reacts
+      customer.json     how the scripted customer reacts, during the
+                        application and, if the case goes on, after the offer
 
 Case files are written by hand, so they are checked strictly: an unknown or
 misspelled key is an error, not silently ignored. A typo such as
@@ -52,6 +53,9 @@ class Expected(Strict, Outcome):
     must_request: list[UploadSlot] = Field(default_factory=list)
     # The most messages the agent may send the customer (None: no limit).
     max_messages_to_customer: int | None = None
+    # How the offer phase should close, for a case that goes on after the
+    # application (None: not checked).
+    offer_outcome: Literal["accepted", "expired"] | None = None
 
 
 class CaseInfo(Strict):
@@ -93,12 +97,33 @@ class Reply(Strict):
         return value
 
 
+class OfferMessage(Strict):
+    """A message from the customer after the offer was sent."""
+
+    # Days after the offer was sent (for the first message) or after the
+    # agent's last message to the customer.
+    after_days: float = Field(default=1, ge=0)
+    message: str
+
+
+class OfferPhaseScript(Strict):
+    """The customer's part after the offer was sent: messages to the bank,
+    one at a time, then the signature."""
+
+    messages: list[OfferMessage] = Field(default_factory=list)
+    # Days after the agent's last message (or the offer, if the customer
+    # never wrote) when the customer signs the latest offer.
+    signs_after_days: float = Field(ge=0)
+
+
 class CustomerScript(Strict):
-    """customer.json. When the replies run out, the customer stops answering."""
+    """customer.json. When the replies run out, the customer stops answering.
+    A case that goes on after the application has an offer phase."""
 
     # A message sent together with the application.
     first_message: str | None = None
     replies: list[Reply] = Field(default_factory=list)
+    offer_phase: OfferPhaseScript | None = None
 
 
 class EvalCase(BaseModel):

@@ -1,0 +1,13 @@
+{
+  "title": "Maria's application, then a question about the offer, then her signature",
+  "kind": "common",
+  "description": "A full flow with both agents. The application part is case 02 (Maria's job change and raise): the application agent should complete it after her new pay stub arrives. The bank then sends her the offer she asked for ($15,000 over 48 months). A day later she asks whether there is a fee for paying the loan off early; the offer agent should look it up in the bank's loan terms and answer that there is no prepayment penalty, naming the source. Two days after that answer she signs the offer, which closes the offer phase as accepted.",
+  "start_time": "2026-09-14T15:00:00Z",
+  "expected": {
+    "outcome": "complete",
+    "reason": "all_checks_passed",
+    "income_verified": true,
+    "must_request": ["pay_stub"],
+    "offer_outcome": "accepted"
+  }
+}
