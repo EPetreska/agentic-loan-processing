@@ -69,7 +69,7 @@ from typing import Literal
 
 from langchain_core.tools import BaseTool
 
-from loans.agent.tools import make_tools
+from loans.agents.application.tools import make_tools
 from loans import policy
 from loans.mcp.client import load_tools
 from loans.mcp.sessions import SessionClock, close_session, open_session

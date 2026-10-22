@@ -5,7 +5,7 @@ It is only for testing (the evals, and run.py on a laptop). It turns the
 case's script into events and hands them to the bank's workflow
 (loans.workflow), which reacts as it would to a real customer: it gives the
 agent its tools, runs the bank's own steps, and the agent loop
-(loans.agent.graph) runs until it pauses or ends. In a real bank the events
+(loans.agents) runs until it pauses or ends. In a real bank the events
 come from real customers, staff and the clock instead, and everything
 outside this file stays the same.
 
@@ -56,8 +56,9 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.types import Command
 
 from loans import policy
-from loans.agent.graph import build_graph, run_until_pause, thread_config
-from loans.agent.prompt import customer_reply_turn, first_turn, no_answer_turn
+from loans.agents.application.graph import build_application_graph
+from loans.agents.loop import run_until_pause, thread_config
+from loans.agents.application.prompt import customer_reply_turn, first_turn, no_answer_turn
 from loans.checks.ending import last_contact
 from loans.evals.case import EvalCase, Reply, submit_case
 from loans.schemas.application import RawFile
@@ -142,7 +143,7 @@ async def simulate_case(
     start_time = case.info.start_time
     tools_and_clock = open_case_for_agent(store, application_id, start_time, mcp_url, SimulatedClock(start_time))
     async with tools_and_clock as (tools, clock):
-        graph = build_graph(model, tools)
+        graph = build_application_graph(model, tools)
         replies = list(case.customer.replies)
         answered = 0  # how many of the agent's messages the customer has reacted to
         pauses = 0

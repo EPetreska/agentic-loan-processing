@@ -1,7 +1,7 @@
 """What the LLM reads about each tool and its parameters.
 
 Shared by both ways the agent can reach the tools: directly
-(loans.agent.tools) and through the MCP server (loans.mcp.server), so the two
+(loans.agents.application.tools) and through the MCP server (loans.mcp.server), so the two
 cannot drift apart. The plain tools in this package keep their own
 docstrings, for developers. Numbers come from the code (here the message
 limit), so a description cannot drift from the real rule.

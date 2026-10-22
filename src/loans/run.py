@@ -66,8 +66,8 @@ import psycopg
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from loans.agent.graph import make_model
-from loans.agent.prompt import PROMPT_VERSION
+from loans.agents.loop import make_model
+from loans.agents.application.prompt import PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log, write_audit_log
 from loans.db.postgres_store import PostgresStore, connect, create_tables, database_conninfo
 from loans.evals.case import load_case

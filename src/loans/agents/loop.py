@@ -1,4 +1,6 @@
-"""The agent loop, built with LangGraph.
+"""The agent loop, built with LangGraph: the loop both agents run (the
+application agent and the offer agent, in loans.agents.application and
+loans.agents.offer), each with its own prompt, tools and stopping rule.
 
 The LLM chooses a tool, the tool runs, the LLM sees the result and chooses
 the next step. When the LLM replies without calling a tool (for example to
@@ -6,8 +8,9 @@ wait for the customer), the run pauses in the wait box (LangGraph's
 interrupt), and the checkpointer saves the conversation under the case's
 thread ID (the application ID). The caller resumes it later with what
 happened in the meantime (the customer's reply, or time passing), which the
-agent receives as a new message. The loop ends only when the case has ended:
-when finish answers that it did.
+agent receives as a new message. Whether the loop ends after a tool step is
+the agent's own stopping rule (the application agent stops when finish
+answers that the case ended).
 
 The loop decides everything from the conversation alone (the LLM's answers
 and the tools' answers) and never reads the bank's data itself: the agent
@@ -24,7 +27,7 @@ Which model runs is a setting (LLM_MODEL, for example "ollama:qwen3:4b" or
 from collections.abc import Callable
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
@@ -33,8 +36,6 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.types import interrupt
 
-from loans.agent.prompt import SYSTEM_PROMPT
-from loans.tools.application.finish import ENDED
 
 # The context window for local Ollama models, in tokens. Ollama otherwise uses
 # a small default and silently cuts off the start of a long conversation
@@ -67,30 +68,21 @@ def thread_config(application_id: str) -> dict:
     return {"configurable": {"thread_id": application_id}}
 
 
-def case_ended(messages: list[BaseMessage]) -> bool:
-    """True if the last tool step ended the case: finish answered that it
-    did. Only finish's own answer counts, not text from the LLM or from
-    another tool (a document cannot end the case by containing the words)."""
-    for message in reversed(messages):
-        if not isinstance(message, ToolMessage):
-            return False  # the tool step's answers are all at the end
-        if message.name == "finish" and str(message.content).startswith(f"{ENDED}:"):
-            return True
-    return False
-
-
 def build_graph(
     model: BaseChatModel,
     tools: list[BaseTool],
+    system_prompt: str,
+    ends_after_tools: Callable[[list[BaseMessage]], bool],
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
-    """The loop for one case, with that case's tools. Runs need a
-    thread_config in their config; without a checkpointer given, one in
-    memory is used."""
+    """The loop for one case: the agent's prompt, its tools for that case,
+    and its stopping rule, which is asked after each tool step whether the
+    run ends there (given the conversation). Runs need a thread_config in
+    their config; without a checkpointer given, one in memory is used."""
     model_with_tools = model.bind_tools(tools)
 
     async def agent(state: MessagesState) -> dict:
-        response = await model_with_tools.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
+        response = await model_with_tools.ainvoke([SystemMessage(system_prompt), *state["messages"]])
         return {"messages": [response]}
 
     def after_agent(state: MessagesState) -> str:
@@ -104,7 +96,7 @@ def build_graph(
         return {"messages": [HumanMessage(news)]}
 
     def after_tools(state: MessagesState) -> str:
-        return END if case_ended(state["messages"]) else "agent"
+        return END if ends_after_tools(state["messages"]) else "agent"
 
     graph = StateGraph(MessagesState)
     graph.add_node("agent", agent)

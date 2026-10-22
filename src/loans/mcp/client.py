@@ -11,7 +11,7 @@ security-critical part, so they stay in code we can read line by line.
 - The token goes with every call, in the Authorization header. The LLM never
   sees it.
 - The call ID is the ID of the LLM's tool call, filled in by LangGraph
-  (InjectedToolCallId), as in loans.agent.tools, so it is not one of the
+  (InjectedToolCallId), as in loans.agents.application.tools, so it is not one of the
   parameters the LLM sees. It goes in the request's _meta field, so the
   server does not do a retried send_message or finish twice.
 - The tool list is checked: the client refuses a server that offers any tool

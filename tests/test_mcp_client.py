@@ -10,7 +10,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from loans.agent.tools import make_tools
+from loans.agents.application.tools import make_tools
 from loans.mcp import client
 from loans.mcp.client import ServerError, load_tools
 from loans.mcp.sessions import close_session

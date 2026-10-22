@@ -6,8 +6,8 @@ from typing import get_args
 import pytest
 
 from loans import policy
-from loans.agent import prompt
-from loans.agent.prompt import (
+from loans.agents.application import prompt
+from loans.agents.application.prompt import (
     PROMPT_VERSION,
     SYSTEM_PROMPT,
     build_system_prompt,

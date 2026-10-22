@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from loans.agent.tools import make_tools
+from loans.agents.application.tools import make_tools
 from loans.evals.case import load_case, submit_case
 from loans.store import ApplicationStore
 from loans.tools.application.send_message import MAX_MESSAGE_LENGTH

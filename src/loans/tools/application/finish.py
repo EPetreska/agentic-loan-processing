@@ -32,7 +32,7 @@ from loans.schemas.outcome import Outcome
 from loans.store import ApplicationStore, CaseEnding
 
 # How finish's answer starts when the case has ended. The agent loop
-# (loans.agent.graph) stops on it, so the two share it.
+# (loans.agents.application.graph) stops on it, so the two share it.
 ENDED = "case ended"
 
 EVENT_BY_OUTCOME = {
