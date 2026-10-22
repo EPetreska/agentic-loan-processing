@@ -1,0 +1,10 @@
+{
+  "actual_type": "drivers_license",
+  "content": {
+    "full_name": "Maria Lopez",
+    "date_of_birth": "1991-03-08",
+    "id_number": "48213907",
+    "issuing_state": "TX",
+    "expiry_date": "2030-03-08"
+  }
+}

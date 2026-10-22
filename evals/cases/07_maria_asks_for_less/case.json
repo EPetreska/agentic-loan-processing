@@ -1,0 +1,13 @@
+{
+  "title": "Maria asks to borrow less; the loan officer approves",
+  "kind": "common",
+  "description": "A full flow with both agents. Maria changed jobs in March and got a raise last month; the application agent should complete her application after her new pay stub arrives. The bank then sends her the offer she asked for ($15,000 over 48 months). A day later she asks to borrow $12,000 instead. The offer agent cannot decide this: it should ask a loan officer and tell her a loan officer will decide, without calculating a new offer. The officer approves $12,000 over 48 months a day later, and the bank sends the revised offer; the offer agent should tell her what changed, quoting the revised offer's numbers. Two days after that she signs the revised $12,000 offer.",
+  "start_time": "2026-09-14T15:00:00Z",
+  "expected": {
+    "outcome": "complete",
+    "reason": "all_checks_passed",
+    "income_verified": true,
+    "must_request": ["pay_stub"],
+    "offer_outcome": "accepted"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "first_message": "I switched jobs in March, so the W-2 is from my old job. I also got a raise last month.",
+  "replies": [
+    {
+      "after_days": 2,
+      "message": "Here is my latest pay stub with the new pay rate.",
+      "uploads": {"pay_stub": "pay_stub_new.json"}
+    }
+  ],
+  "offer_phase": {
+    "messages": [
+      {"after_days": 1, "message": "Could I borrow $20,000 instead of $15,000?"}
+    ],
+    "signs_after_days": 2
+  }
+}

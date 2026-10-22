@@ -1,0 +1,30 @@
+{
+  "full_name": "Maria Lopez",
+  "date_of_birth": "1991-03-08",
+  "ssn": "538-72-1904",
+  "address": {
+    "street": "2210 Riverside Dr",
+    "city": "Austin",
+    "state": "TX",
+    "zip": "78741"
+  },
+  "phone": "(512) 555-0187",
+  "email": "maria.lopez@example.com",
+  "id_document": {
+    "type": "drivers_license",
+    "front": {"filename": "dl_front.jpg", "content_type": "image/jpeg"},
+    "back": {"filename": "dl_back.jpg", "content_type": "image/jpeg"}
+  },
+  "employment_status": "employed",
+  "employer_name": "Brightline Health",
+  "annual_income": "78000",
+  "income_documents": {
+    "pay_stub": {"filename": "paystub_july.pdf", "content_type": "application/pdf"},
+    "w2": {"filename": "w2_2025_northside.pdf", "content_type": "application/pdf"}
+  },
+  "monthly_housing_payment": "1650",
+  "loan_amount": "15000",
+  "term_months": "48",
+  "credit_check_consent": "yes",
+  "esign_consent": "yes"
+}

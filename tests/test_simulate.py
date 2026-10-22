@@ -6,6 +6,7 @@ The fake LLM plays back fixed answers, so these tests check the simulation
 
 import asyncio
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -243,9 +244,9 @@ OFFER_AGENT = [
 ]
 
 
-def full_flow(answers=MARIA + OFFER_AGENT, search=lambda query: [SECTION], **kwargs):
+def full_flow(answers=MARIA + OFFER_AGENT, search=lambda query: [SECTION], case_name="05_maria_asks_and_signs", **kwargs):
     store = ApplicationStore()
-    case = load_case(CASES / "05_maria_asks_and_signs")
+    case = load_case(CASES / case_name)
     result = run_simulation(case, store, FakeModel(messages=iter(answers)), search=search, **kwargs)
     return store, case, store.get(result.application_id), result
 
@@ -299,6 +300,56 @@ def test_each_agent_keeps_its_own_conversation():
 def test_the_offer_agent_needs_the_document_search():
     with pytest.raises(ValueError, match="document search"):
         full_flow(search=None)
+
+
+# The loan officer: cases 06 (more money, declined) and 07 (less, approved).
+
+
+def asks_officer(request, told, decided):
+    """The offer agent's answers: ask the officer, tell the customer, wait;
+    then, resumed with the decision, tell the customer and wait."""
+    return [
+        step("request_approval", {"request": request, "reason": "A change to the offer."}, "o1"),
+        step("send_message", {"text": told, "reason": "Her request."}, "o2"),
+        wait("Waiting for the loan officer's decision."),
+        step("send_message", {"text": decided, "reason": "The decision."}, "o3"),
+        wait(),
+    ]
+
+
+def test_more_money_is_declined_and_she_signs_the_first_offer():
+    answers = MARIA + asks_officer("Borrow $20,000 instead of $15,000.", "A loan officer will decide.",
+                                   "Your request was declined; the $15,000 offer stands.")  # fmt: skip
+    _, case, stored, result = full_flow(answers, case_name="06_maria_asks_for_more")
+    [request] = stored.approval_requests
+    assert (request.status, request.officer_id) == ("declined", "officer-17")
+    assert request.decided_at == request.requested_at + timedelta(days=1)
+    assert len(stored.offers) == 1 and stored.signature.offer_index == 0
+    assert stored.offer_closing.outcome == case.info.expected.offer_outcome == "accepted"
+    told = [m.content for m in result.offer_messages if "A loan officer declined" in str(m.content)]
+    assert len(told) == 1  # the agent was resumed with the decision
+
+
+def test_less_money_is_approved_and_she_signs_the_revised_offer():
+    answers = MARIA + asks_officer("Borrow $12,000 instead of $15,000.", "A loan officer will decide.",
+                                   "Approved: your revised offer is $12,000 over 48 months.")  # fmt: skip
+    _, case, stored, result = full_flow(answers, case_name="07_maria_asks_for_less")
+    assert stored.approval_requests[0].status == "approved"
+    revised = stored.offers[1]
+    assert (revised.amount, revised.term_months) == (Decimal("12000"), 48)
+    assert [s.offer_index for s in stored.offers_sent] == [0, 1]
+    assert stored.signature.offer_index == 1  # the revised offer, not the first
+    assert stored.offer_closing.outcome == case.info.expected.offer_outcome == "accepted"
+    resumed = next(m.content for m in result.offer_messages if "A loan officer approved" in str(m.content))
+    assert stored.offers_sent[1].notice in resumed  # the agent saw the revised offer
+    assert "$12,000.00" in resumed
+
+
+def test_she_signs_two_days_after_the_agent_passes_on_the_decision():
+    answers = MARIA + asks_officer("Borrow $12,000.", "A loan officer will decide.", "Approved.")
+    _, _, stored, _ = full_flow(answers, case_name="07_maria_asks_for_less")
+    assert stored.messages[-1].sent_at > stored.approval_requests[0].decided_at
+    assert stored.signature.signed_at == stored.messages[-1].sent_at + timedelta(days=2)
 
 
 def test_a_case_without_an_offer_phase_stops_after_the_application():

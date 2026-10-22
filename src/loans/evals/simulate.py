@@ -35,9 +35,14 @@ thread: each scripted message from the customer starts the offer agent (the
 first, together with the offer) or resumes it, and the agent runs until it
 pauses. Then the customer signs the latest offer; the workflow closes the
 offer phase as accepted (loans.workflow.sign_offer), and the offer agent's
-paused run is ended without the LLM (loans.agents.loop.end_run). For now the
-offer agent works only directly (no MCP server), and the customer always
-signs; the loan officer and expiry come later. Time is simulated: the clock starts at the case's
+paused run is ended without the LLM (loans.agents.loop.end_run).
+
+The loan officer is scripted too (the case's officer.json): whenever the
+offer agent pauses with a request waiting, the officer decides it after the
+script's delay, through the workflow (loans.workflow.decide_approval; an
+approval creates and sends the revised offer), and the agent is resumed
+with the decision. For now the offer agent works only directly (no MCP
+server), and the customer always signs; expiry comes later. Time is simulated: the clock starts at the case's
 start time and moves one minute per tool call, plus the jumps above.
 
 A pause is the run stopping in the agent loop's wait box; the checkpointer
@@ -73,10 +78,17 @@ from loans.agents.application.prompt import customer_reply_turn, first_turn, no_
 from loans.agents.offer import prompt as offer_prompt
 from loans.agents.offer.graph import build_offer_graph
 from loans.checks.ending import last_contact
-from loans.evals.case import EvalCase, OfferPhaseScript, Reply, submit_case
+from loans.evals.case import EvalCase, OfferPhaseScript, OfficerScript, Reply, submit_case
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore
-from loans.workflow import Search, after_application, open_case_for_agent, receive_reply, sign_offer
+from loans.workflow import (
+    Search,
+    after_application,
+    decide_approval,
+    open_case_for_agent,
+    receive_reply,
+    sign_offer,
+)
 
 # The most times the agent may stop to wait before the simulation gives up.
 MAX_PAUSES = 10
@@ -212,7 +224,7 @@ async def simulate_case(
         base_config = {k: v for k, v in config.items() if k != "configurable"}
         offer_config = {**base_config, **thread_config(thread_id_base, "offer")}
         result.offer_messages = await _simulate_offer_phase(
-            store, application_id, script, model, search, offer_config, on_message, on_token
+            store, application_id, script, case.officer, model, search, offer_config, on_message, on_token
         )
         if result.offer_messages:
             result.offer_thread_id = offer_config["configurable"]["thread_id"]
@@ -223,6 +235,7 @@ async def _simulate_offer_phase(
     store: ApplicationStore,
     application_id: str,
     script: OfferPhaseScript,
+    officer: OfficerScript | None,
     model: BaseChatModel,
     search: Search | None,
     config: dict,
@@ -232,16 +245,24 @@ async def _simulate_offer_phase(
     """The offer phase, from the offer sent to the signature: each scripted
     message reaches the bank (receive_reply) and the offer agent, which is
     started with the offer and the first message and resumed with the later
-    ones; then the customer signs (sign_offer), and the offer agent's paused
-    run is ended without the LLM (end_run). Returns the offer agent's
-    conversation (empty if the customer never wrote)."""
+    ones. Whenever the agent pauses with a request waiting and the officer's
+    script has a decision left, the officer decides (decide_approval) and the
+    agent is resumed with the decision. Then the customer signs the latest
+    offer (sign_offer), and the offer agent's paused run is ended without the
+    LLM (end_run). Returns the offer agent's conversation (empty if the
+    customer never wrote)."""
     sent = store.get(application_id).offers_sent[-1]
+    decisions = list(officer.decisions) if officer else []
     messages: list[BaseMessage] = []
     tools_and_clock = open_case_for_agent(
         store, application_id, sent.sent_at, None, SimulatedClock(sent.sent_at), "offer", search
     )
     async with tools_and_clock as (tools, clock):
         graph = build_offer_graph(model, tools)
+
+        async def run(run_input) -> list[BaseMessage]:
+            return await run_until_pause(graph, run_input, config, on_message, on_token)
+
         last = sent.sent_at  # the offer, then the agent's last message
         for number, scripted in enumerate(script.messages):
             clock.jump_to(last + timedelta(days=scripted.after_days))
@@ -252,16 +273,29 @@ async def _simulate_offer_phase(
                 start = HumanMessage(text)
                 if on_message:
                     on_message(start)
-                run_input = {"messages": [start]}
+                messages = await run({"messages": [start]})
             else:
                 text = offer_prompt.customer_message_turn(scripted.after_days, scripted.message, now.date())
-                run_input = Command(resume=text)
-            messages = await run_until_pause(graph, run_input, config, on_message, on_token)
+                messages = await run(Command(resume=text))
+
+            # The loan officer decides a waiting request, if the script says how.
+            while (request := store.get(application_id).pending_approval()) and decisions:
+                decision = decisions.pop(0)
+                clock.jump_to(request.requested_at + timedelta(days=decision.after_days))
+                decided_at = clock()
+                decide_approval(
+                    store, application_id, officer.officer_id, decision.decision, decision.note,
+                    decided_at, amount=decision.amount, term_months=decision.term_months,
+                )  # fmt: skip
+                if decision.decision == "approve":
+                    revised = store.get(application_id).offers_sent[-1].notice
+                    news = offer_prompt.officer_decision_turn("approved", decided_at.date(), revised)
+                else:
+                    news = offer_prompt.officer_decision_turn("declined", decided_at.date())
+                messages = await run(Command(resume=news))
+
             sent_to_customer = store.get(application_id).messages
-            if sent_to_customer and sent_to_customer[-1].sent_at > last:
-                last = sent_to_customer[-1].sent_at
-            else:
-                last = now
+            last = max(last, now, sent_to_customer[-1].sent_at if sent_to_customer else now)
 
         clock.jump_to(last + timedelta(days=script.signs_after_days))
         signed_at = clock()
@@ -269,7 +303,7 @@ async def _simulate_offer_phase(
         sign_offer(store, application_id, latest.offer_index, signed_at)
         if messages:  # the offer agent ran, so its paused run is ended
             closing = offer_prompt.closed_turn("accepted", signed_at.date())
-            messages = await run_until_pause(graph, end_run(closing), config, on_message, on_token)
+            messages = await run(end_run(closing))
     return messages
 
 

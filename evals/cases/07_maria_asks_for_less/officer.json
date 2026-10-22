@@ -1,0 +1,6 @@
+{
+  "officer_id": "officer-17",
+  "decisions": [
+    {"after_days": 1, "decision": "approve", "amount": "12000", "term_months": 48, "note": "A smaller loan is fine."}
+  ]
+}

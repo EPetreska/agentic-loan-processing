@@ -10,6 +10,8 @@ A case is a folder:
                         customer uploads later (for example pay_stub_new.json)
       customer.json     how the scripted customer reacts, during the
                         application and, if the case goes on, after the offer
+      officer.json      (optional) how the scripted loan officer decides the
+                        offer agent's requests, in order
 
 Case files are written by hand, so they are checked strictly: an unknown or
 misspelled key is an error, not silently ignored. A typo such as
@@ -18,10 +20,11 @@ misspelled key is an error, not silently ignored. A typo such as
 
 import json
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from loans.schemas.application import RawApplication, RawValue
 from loans.schemas.documents import UploadedDocument, UploadSlot
@@ -126,6 +129,32 @@ class CustomerScript(Strict):
     offer_phase: OfferPhaseScript | None = None
 
 
+class OfficerDecision(Strict):
+    """The scripted loan officer's decision on one request."""
+
+    # Days after the offer agent made the request.
+    after_days: float = Field(default=1, ge=0)
+    decision: Literal["approve", "decline"]
+    # For an approval: the amount and term of the revised offer.
+    amount: Decimal | None = None
+    term_months: int | None = None
+    note: str = ""
+
+    @model_validator(mode="after")
+    def approval_has_amount_and_term(self) -> "OfficerDecision":
+        if self.decision == "approve" and (self.amount is None or self.term_months is None):
+            raise ValueError("an approval needs an amount and a term_months")
+        return self
+
+
+class OfficerScript(Strict):
+    """officer.json: the loan officer's decisions, one per request, in order.
+    When they run out, a request stays waiting."""
+
+    officer_id: str
+    decisions: list[OfficerDecision] = Field(default_factory=list)
+
+
 class EvalCase(BaseModel):
     """One loaded case, ready for the runner."""
 
@@ -134,6 +163,7 @@ class EvalCase(BaseModel):
     application: RawApplication
     documents: dict[str, UploadedDocument]  # file name -> document
     customer: CustomerScript
+    officer: OfficerScript | None = None
 
 
 def _read_json(path: Path) -> dict:
@@ -156,6 +186,11 @@ def load_case(folder: Path) -> EvalCase:
         ),
         documents=documents,
         customer=CustomerScript.model_validate(_read_json(folder / "customer.json")),
+        officer=(
+            OfficerScript.model_validate(_read_json(folder / "officer.json"))
+            if (folder / "officer.json").exists()
+            else None
+        ),
     )
 
     # Every upload in the form has its document, named after the slot.
