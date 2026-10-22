@@ -10,7 +10,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from loans.agents.application.tools import make_tools
+from loans.agents.application.tools import make_application_tools
 from loans.mcp import client
 from loans.mcp.client import ServerError, load_tools
 from loans.mcp.sessions import close_session
@@ -35,7 +35,7 @@ async def run_tool(tools, name: str, args: dict, call_id: str):
 async def test_the_llm_sees_the_same_tools_through_mcp(mcp_url, maria):
     _, _, token = maria
     through_mcp = {t.name: convert_to_openai_tool(t) for t in await load_tools(mcp_url, token)}
-    direct = make_tools(ApplicationStore(), "unused", lambda: datetime.now(UTC))
+    direct = make_application_tools(ApplicationStore(), "unused", lambda: datetime.now(UTC))
     assert through_mcp == {t.name: convert_to_openai_tool(t) for t in direct}
 
 

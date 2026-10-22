@@ -32,7 +32,11 @@ The agents and the bank's steps:
   server (as deployed) it opens a session for the case, connects the client
   with the session's token and hands the agent the resulting tool
   connections, and closes the session at the end, also if the run fails.
-  Directly (no server) the tools run in this program on the store.
+  Directly (no server) the tools run in this program on the store. Each
+  agent gets its own tools: the application agent its six, the offer agent
+  its three, whose document search (the RAG search) is passed in by the
+  caller. The offer agent works only directly for now; its tools are not
+  yet on the MCP server.
 - after_application: once the application agent has completed a case, the
   credit check (loans.services.credit_bureau) and, if it passes, the offer
   (loans.offers), which is sent at once. Cancelled cases and cases sent to a
@@ -69,11 +73,13 @@ from typing import Literal
 
 from langchain_core.tools import BaseTool
 
-from loans.agents.application.tools import make_tools
+from loans.agents.application.tools import make_application_tools
+from loans.agents.offer.tools import make_offer_tools
 from loans import policy
 from loans.mcp.client import load_tools
 from loans.mcp.sessions import SessionClock, close_session, open_session
 from loans.offers import create_offer, offer_for, offer_notice
+from loans.rag.search import SearchResult
 from loans.schemas.application import (
     ALLOWED_TERMS,
     MAX_LOAN_AMOUNT,
@@ -93,6 +99,7 @@ from loans.store import (
 )
 
 Clock = Callable[[], datetime]
+Search = Callable[[str], list[SearchResult]]
 
 
 def receive_application(
@@ -139,13 +146,23 @@ async def open_case_for_agent(
     start: datetime,
     mcp_url: str | None,
     direct_clock: Clock,
+    agent: Literal["application", "offer"],
+    search: Search | None = None,
 ) -> AsyncGenerator[tuple[list[BaseTool], Clock]]:
     """Access to one case for an agent, while the context is open: the tools
-    it may use on that case, and the case's clock. Through the MCP server if
-    mcp_url is given (the clock is then the session's, shared with the
-    server), else directly with direct_clock."""
+    that agent may use on that case, and the case's clock. Through the MCP
+    server if mcp_url is given (the clock is then the session's, shared with
+    the server), else directly with direct_clock. The offer agent needs the
+    document search (search), and works only directly for now."""
+    if agent == "offer":
+        if search is None:
+            raise ValueError("the offer agent needs the document search")
+        if mcp_url is not None:
+            raise NotImplementedError("the offer agent's tools are not on the MCP server yet")
+        yield make_offer_tools(store, application_id, direct_clock, search), direct_clock
+        return
     if mcp_url is None:
-        yield make_tools(store, application_id, direct_clock), direct_clock
+        yield make_application_tools(store, application_id, direct_clock), direct_clock
         return
     conn = store.connection  # a PostgresStore: the server works on the same database
     token = open_session(conn, application_id, start, store.agent)

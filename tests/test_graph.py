@@ -18,7 +18,7 @@ from langgraph.types import Command
 from loans.agents.application.graph import build_application_graph, case_ended
 from loans.agents.loop import make_model, thread_config
 from loans.agents.application.prompt import SYSTEM_PROMPT, first_turn
-from loans.agents.application.tools import make_tools
+from loans.agents.application.tools import make_application_tools
 from loans.evals.case import load_case, submit_case
 from loans.store import ApplicationStore
 
@@ -51,7 +51,7 @@ def run(answers, case_name="01_clean_application"):
     case = load_case(CASES / case_name)
     app_id = submit_case(store, case)
     model = FakeModel(messages=iter(answers))
-    tools = make_tools(store, app_id, lambda: case.info.start_time)
+    tools = make_application_tools(store, app_id, lambda: case.info.start_time)
     graph = build_application_graph(model, tools)
     result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
     return store, app_id, result
@@ -109,7 +109,7 @@ def build(answers, case_name="03_no_answer"):
     store = ApplicationStore()
     case = load_case(CASES / case_name)
     app_id = submit_case(store, case)
-    tools = make_tools(store, app_id, lambda: case.info.start_time)
+    tools = make_application_tools(store, app_id, lambda: case.info.start_time)
     graph = build_application_graph(FakeModel(messages=iter(answers)), tools)
     return store, app_id, graph
 
@@ -169,7 +169,7 @@ def test_only_finish_can_end_the_loop():
     store = ApplicationStore()
     case = load_case(CASES / "01_clean_application")
     app_id = submit_case(store, case)
-    tools = [*make_tools(store, app_id, lambda: case.info.start_time), echo]
+    tools = [*make_application_tools(store, app_id, lambda: case.info.start_time), echo]
     graph = build_application_graph(FakeModel(messages=iter([step("echo"), *DANIEL])), tools)
     result = invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
     assert store.get(app_id).ending.outcome == "complete"  # the loop went on to finish
@@ -208,6 +208,6 @@ def test_the_application_agent_runs_with_its_own_prompt():
     store = ApplicationStore()
     case = load_case(CASES / "01_clean_application")
     app_id = submit_case(store, case)
-    graph = build_application_graph(Recording(messages=iter(DANIEL)), make_tools(store, app_id, lambda: case.info.start_time))
+    graph = build_application_graph(Recording(messages=iter(DANIEL)), make_application_tools(store, app_id, lambda: case.info.start_time))
     invoke(graph, {"messages": [HumanMessage(first_turn(None, DAY))]}, thread_config(app_id, "application"))
     assert seen and all(prompt == SYSTEM_PROMPT for prompt in seen)

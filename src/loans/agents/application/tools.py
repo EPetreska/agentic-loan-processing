@@ -1,10 +1,11 @@
 """The six tools, as the LLM sees them.
 
-make_tools wraps the plain tools in tools/application/ for LangGraph, for one case. The
-store, the application ID and the clock are filled in here, and the call ID
-comes from the LLM's tool call (InjectedToolCallId), so none of them is part
-of the parameters the LLM sees: the LLM chooses only the slot, the text, the
-reason, the outcome and the explanation. The LLM is never given the
+make_application_tools wraps the plain tools in tools/application/ for
+LangGraph, for one case. The store, the application ID and the clock are
+filled in here, and the call ID comes from the LLM's tool call
+(InjectedToolCallId), so none of them is part of the parameters the LLM
+sees: the LLM chooses only the slot, the text, the reason, the outcome and
+the explanation. The LLM is never given the
 application ID, so text in a prompt cannot point a tool at another case.
 
 What the LLM reads about each tool comes from loans.tools.application.descriptions, shared
@@ -32,7 +33,7 @@ from loans.tools.application.verify_identity import verify_identity as _verify_i
 CallId = Annotated[str, InjectedToolCallId]
 
 
-def make_tools(
+def make_application_tools(
     store: ApplicationStore, application_id: str, clock: Callable[[], datetime]
 ) -> list[BaseTool]:
     """The tools for one case. clock gives the current (possibly simulated)

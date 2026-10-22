@@ -7,7 +7,8 @@ agent on a case, it opens a session for that case and gets a token, a random
 code, which it hands to the agent. The agent sends the token with every call,
 and the server finds the case from it. A token opens one case only, and stops
 working when the session is closed. It does across the network what
-make_tools does inside one program, where the case ID is built into the tools.
+make_application_tools does inside one program, where the case ID is built
+into the tools.
 
 The workflow is trusted, so it opens and closes sessions by writing to the
 database directly; the server only checks tokens. A case has at most one

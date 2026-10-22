@@ -12,7 +12,7 @@ from langgraph.types import Command
 
 from loans.agents.application.graph import build_application_graph
 from loans.agents.application.prompt import first_turn as application_first_turn
-from loans.agents.application.tools import make_tools
+from loans.agents.application.tools import make_application_tools
 from loans.agents.loop import end_run, thread_config
 from loans.agents.offer.graph import build_offer_graph, never_ends
 from loans.agents.offer.prompt import SYSTEM_PROMPT, closed_turn, first_turn, officer_decision_turn
@@ -124,7 +124,7 @@ def test_each_agent_keeps_its_own_conversation_on_a_case():
     store, app_id, offer_tools = offered()
     shared = InMemorySaver()  # as a database checkpointer would be
     application = build_application_graph(
-        FakeModel(messages=iter([AIMessage("Waiting.")])), make_tools(store, app_id, lambda: None), shared
+        FakeModel(messages=iter([AIMessage("Waiting.")])), make_application_tools(store, app_id, lambda: None), shared
     )
     asyncio.run(application.ainvoke(
         {"messages": [HumanMessage(application_first_turn(None, DAY))]}, thread_config(app_id, "application")

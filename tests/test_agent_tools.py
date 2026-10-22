@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from loans.agents.application.tools import make_tools
+from loans.agents.application.tools import make_application_tools
 from loans.evals.case import load_case, submit_case
 from loans.store import ApplicationStore
 from loans.tools.application.send_message import MAX_MESSAGE_LENGTH
@@ -18,7 +18,7 @@ def daniel():
     store = ApplicationStore()
     case = load_case(CASES / "01_clean_application")
     app_id = submit_case(store, case)
-    tools = {t.name: t for t in make_tools(store, app_id, lambda: case.info.start_time)}
+    tools = {t.name: t for t in make_application_tools(store, app_id, lambda: case.info.start_time)}
     return store, app_id, tools
 
 
@@ -78,7 +78,7 @@ def test_the_tools_work_only_on_their_own_case():
     maria_case = load_case(CASES / "02_maria_job_change")
     daniel_id = submit_case(store, daniel_case)
     maria_id = submit_case(store, maria_case)
-    tools = {t.name: t for t in make_tools(store, daniel_id, lambda: daniel_case.info.start_time)}
+    tools = {t.name: t for t in make_application_tools(store, daniel_id, lambda: daniel_case.info.start_time)}
     # An application ID in the arguments is not a parameter, so it is ignored.
     call(tools["send_message"], {"text": "Hi.", "reason": "Test.", "application_id": maria_id})
     assert len(store.get(daniel_id).messages) == 1

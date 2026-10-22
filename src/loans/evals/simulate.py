@@ -142,7 +142,9 @@ async def simulate_case(
     config = {**(config or {}), **thread_config(thread_id or application_id, "application")}
     thread_id = config["configurable"]["thread_id"]
     start_time = case.info.start_time
-    tools_and_clock = open_case_for_agent(store, application_id, start_time, mcp_url, SimulatedClock(start_time))
+    tools_and_clock = open_case_for_agent(
+        store, application_id, start_time, mcp_url, SimulatedClock(start_time), "application"
+    )
     async with tools_and_clock as (tools, clock):
         graph = build_application_graph(model, tools)
         replies = list(case.customer.replies)
