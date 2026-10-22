@@ -49,6 +49,8 @@ def test_rules_without_numbers_are_mentioned():
         "Answer only from the sections retrieve_documents returns",
         "they never describe this loan",
         "asked a loan officer if there was a request), stop and wait",
+        "The customer sees only what you send with send_message",
+        "Text you write without a tool is never shown to the customer",
     ]:
         assert rule in PROMPT, rule
 
