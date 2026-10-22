@@ -168,7 +168,7 @@ async def open_case_for_agent(
     conn = store.connection  # a PostgresStore: the server works on the same database
     token = open_session(conn, application_id, agent, start, store.agent)
     try:
-        yield await load_tools(f"{mcp_url}/{agent}", token), SessionClock(conn, token)
+        yield await load_tools(f"{mcp_url}/{agent}", token, agent), SessionClock(conn, token)
     finally:
         close_session(conn, token)
 

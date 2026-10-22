@@ -1,7 +1,7 @@
 """The MCP client: the server's tools, as LangChain tools for the agent.
 
-load_tools asks the MCP server (loans.mcp.server) for its tools and turns
-each into a LangChain tool the agent can call, so the server is the one
+load_tools asks the MCP server (loans.mcp.server), at one agent's endpoint,
+for its tools and turns each into a LangChain tool the agent can call, so the server is the one
 source of what the LLM reads about the tools. A small client of our own on
 the official MCP SDK, rather than a LangChain MCP library: LangChain's
 langchain-mcp-adapters needs version 1 of the SDK, and its replacement is in
@@ -15,8 +15,9 @@ security-critical part, so they stay in code we can read line by line.
   parameters the LLM sees. It goes in the request's _meta field, so the
   server does not do a retried send_message or finish twice.
 - The tool list is checked: the client refuses a server that offers any tool
-  other than the expected six, so a changed or fake server cannot slip a new
-  tool in front of the LLM.
+  other than the ones expected for the agent it loads them for (the
+  application agent's six, or the offer agent's three), so a changed or fake
+  server cannot slip a new tool in front of the LLM.
 
 Two kinds of failure are kept apart. When the bank's rules refuse an action
 ("not sent: ..."), the tool returns that text and the LLM can correct
@@ -42,18 +43,22 @@ from mcp.types import Tool
 from pydantic import BaseModel, Field, create_model
 
 from loans.mcp import CALL_ID_KEY
+from loans.mcp.sessions import AgentName
 
-# The tools the agent expects from the server, and nothing else.
-EXPECTED_TOOLS = frozenset(
-    {
-        "check_application",
-        "read_document",
-        "verify_identity",
-        "mark_income_verified",
-        "send_message",
-        "finish",
-    }
-)
+# The tools each agent expects from its endpoint, and nothing else.
+EXPECTED_TOOLS: dict[AgentName, frozenset[str]] = {
+    "application": frozenset(
+        {
+            "check_application",
+            "read_document",
+            "verify_identity",
+            "mark_income_verified",
+            "send_message",
+            "finish",
+        }
+    ),
+    "offer": frozenset({"retrieve_documents", "request_approval", "send_message"}),
+}
 
 # How long to wait for the server before giving up, in seconds. Retrying a
 # call that timed out comes with the tool-timeout failure case.
@@ -95,18 +100,20 @@ def server_is_running(url: str) -> bool:
     return True
 
 
-async def load_tools(url: str, token: str) -> list[BaseTool]:
-    """The server's tools for the case the token opens, as LangChain tools."""
+async def load_tools(url: str, token: str, agent: AgentName) -> list[BaseTool]:
+    """The server's tools for the case the token opens, as LangChain tools:
+    exactly the tools this agent expects, or ServerError."""
     try:
         async with connect(url, token) as session:
             listed = (await session.list_tools()).tools
     except Exception as e:  # including error groups from the connection
         raise ServerError(f"cannot load the tools from {url}: {_problem(e)}") from e
     names = {tool.name for tool in listed}
-    if names != EXPECTED_TOOLS:
+    expected = EXPECTED_TOOLS[agent]
+    if names != expected:
         raise ServerError(
-            f"unexpected tools from {url}: offers {sorted(names - EXPECTED_TOOLS)}, "
-            f"lacks {sorted(EXPECTED_TOOLS - names)}"
+            f"unexpected tools from {url} for the {agent} agent: offers "
+            f"{sorted(names - expected)}, lacks {sorted(expected - names)}"
         )
     return [_as_langchain_tool(url, token, tool) for tool in listed]
 
@@ -123,7 +130,7 @@ def _args_model(tool: Tool) -> type[BaseModel]:
         elif spec.get("type") == "string":
             kind = str
         else:
-            # The six tools take only text and choices; anything else is a
+            # The tools take only text and choices; anything else is a
             # server change this client was not written for.
             raise ServerError(f"{tool.name}: unsupported parameter {name!r}: {spec}")
         default = ... if name in required else spec.get("default")
