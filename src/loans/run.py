@@ -35,12 +35,15 @@ folder per case inside:
     runs/<run time>/<application ID>/
         audit.jsonl          the audit log
         conversation.json    the messages between the agents and the customer
+        transcript.json      everything the LLM saw and wrote, for each agent
 
 Both are written at the end, also if the run fails halfway, from the case as
 kept in Postgres, where every event is recorded the moment it happens (with
 --direct, the audit log is written event by event as it happens). The
 conversation is kept so it can be reviewed and checked by the evals; the
-audit log itself keeps no message text.
+audit log itself keeps no message text. The transcript is written when the
+run finishes, and the automatic checks (loans.evals.checks) are then applied
+and printed.
 
 Settings come from .env (see .env.example), API keys from the system keyring
 (see loans.keyring): LLM_MODEL chooses the model
@@ -76,7 +79,8 @@ from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log, write_audit_log
 from loans.db.postgres_store import PostgresStore, connect, create_tables, database_conninfo
 from loans.evals.case import load_case
-from loans.evals.simulate import simulate_case
+from loans.evals.checks import format_checks, run_checks, transcript_entries
+from loans.evals.simulate import SimulationResult, simulate_case
 from loans.workflow import Search
 from loans.keyring import API_KEYS, keyring_lookup
 from loans.mcp.client import server_is_running
@@ -237,6 +241,17 @@ def open_bank_store(agent: AgentVersion) -> PostgresStore:
     return PostgresStore(conn, agent=agent)
 
 
+def write_transcript(path: Path, result: SimulationResult) -> dict[str, list[dict]]:
+    """Save what the LLM saw and wrote, for each agent, and return it."""
+    transcript = {
+        "application": transcript_entries(result.messages),
+        "offer": transcript_entries(result.offer_messages),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(transcript, indent=2) + "\n")
+    return transcript
+
+
 def open_document_search() -> tuple[psycopg.Connection, Search]:
     """For a direct run with an offer phase: a connection to Postgres, where
     the RAG sections are kept, and the offer agent's search on it. Stops
@@ -348,6 +363,7 @@ def main(argv: list[str] | None = None) -> None:
                 write_audit_log(case_dir / "audit.jsonl", stored.audit_log)
 
     stored = store.get(result.application_id)
+    transcript = write_transcript(case_dir / "transcript.json", result)
     through = "direct" if args.direct else f"MCP server at {mcp_url}"
     offer_prompt = f"  offer prompt: {OFFER_PROMPT_VERSION}" if result.offer_messages else ""
     print(f"case: {case.case_id}  model: {model_spec}  prompt: {PROMPT_VERSION}{offer_prompt}")
@@ -375,7 +391,9 @@ def main(argv: list[str] | None = None) -> None:
     print()
     print(format_audit_log(stored.audit_log))
     print()
-    print(f"files: {case_dir}/ (audit.jsonl, conversation.json)")
+    print(format_checks(run_checks(transcript, stored.audit_log, case)))
+    print()
+    print(f"files: {case_dir}/ (audit.jsonl, conversation.json, transcript.json)")
 
 
 if __name__ == "__main__":

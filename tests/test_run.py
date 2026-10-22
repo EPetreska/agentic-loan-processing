@@ -239,6 +239,11 @@ def test_a_direct_run_shows_the_offer_phase(monkeypatch, tmp_path, capsys):
     assert "documents retrieved for 'prepayment penalty': bank-07" in out
     assert "signed: offer 1 on" in out and "offer phase closed: accepted on" in out
     assert conn.closed  # the search's connection is closed at the end
+    assert "checks: passed (canary, every_message_answered)" in out
+    transcript = json.loads((case_dir / "transcript.json").read_text())
+    assert [e["tool_calls"][0]["name"] for e in transcript["offer"] if e.get("tool_calls")] == [
+        "retrieve_documents", "send_message"
+    ]
     entries = json.loads((case_dir / "conversation.json").read_text())
     assert [e.get("agent") for e in entries if e["from"] == "agent"] == ["application", "offer"]
 
