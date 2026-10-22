@@ -61,8 +61,8 @@ from loans.agent.prompt import customer_reply_turn, first_turn, no_answer_turn
 from loans.checks.ending import last_contact
 from loans.evals.case import EvalCase, Reply, submit_case
 from loans.schemas.application import RawFile
-from loans.store import ApplicationStore, CustomerReply
-from loans.workflow import after_application, open_case_for_agent
+from loans.store import ApplicationStore
+from loans.workflow import after_application, open_case_for_agent, receive_reply
 
 # The most times the agent may stop to wait before the simulation gives up.
 MAX_PAUSES = 10
@@ -182,25 +182,18 @@ async def simulate_case(
 def _apply_reply(
     store: ApplicationStore, application_id: str, case: EvalCase, reply: Reply, clock
 ) -> str:
-    """Record the reply, apply the customer's uploads and corrections, and
-    return the message that tells the agent about the reply."""
+    """The scripted customer's reply: what Maria sends, from the script,
+    handed to the bank's workflow to record (loans.workflow.receive_reply).
+    Returns the message that tells the agent about the reply."""
     received_at = clock()  # the reply and its attachments arrive together
-    store.record_reply(
-        application_id,
-        CustomerReply(
-            received_at=received_at,
-            message=reply.message,
-            uploads=list(reply.uploads),
-            corrected_fields=list(reply.changes),
-        ),
-    )
-    for slot, file_name in reply.uploads.items():
-        file = RawFile(
-            filename=file_name, content_type=CONTENT_TYPES.get(slot, DEFAULT_CONTENT_TYPE)
+    uploads = {
+        slot: (
+            case.documents[file_name],
+            RawFile(filename=file_name, content_type=CONTENT_TYPES.get(slot, DEFAULT_CONTENT_TYPE)),
         )
-        store.upload(application_id, slot, case.documents[file_name], file, now=received_at)
-    if reply.changes:
-        store.correct_fields(application_id, reply.changes, now=received_at)
+        for slot, file_name in reply.uploads.items()
+    }
+    receive_reply(store, application_id, received_at, reply.message, uploads, reply.changes)
 
     return customer_reply_turn(
         reply.after_days,

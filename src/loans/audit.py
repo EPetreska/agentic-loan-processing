@@ -24,8 +24,9 @@ from pydantic import BaseModel, ConfigDict
 
 from loans.spotlight import quote
 
-# Who acted. "guardrail" is the code refusing an action the agent asked for.
-Actor = Literal["system", "customer", "agent", "guardrail"]
+# Who acted. "guardrail" is the code refusing an action the agent asked for;
+# "human" is a person at the bank, such as a loan officer.
+Actor = Literal["system", "customer", "agent", "guardrail", "human"]
 
 EventName = Literal[
     # system and customer
@@ -33,6 +34,7 @@ EventName = Literal[
     "document_uploaded",
     "form_corrected",
     "customer_replied",
+    "offer_signed",
     # the application agent
     "form_checked",
     "document_read",
@@ -47,7 +49,10 @@ EventName = Literal[
     # the bank's workflow, after the application
     "credit_checked",
     "offer_created",
+    "offer_sent",
     "offer_closed",
+    # a person at the bank
+    "approval_decided",
     # the offer agent (it also uses message_sent)
     "approval_requested",
     "terms_searched",

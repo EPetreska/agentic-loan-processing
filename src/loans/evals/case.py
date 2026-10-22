@@ -26,6 +26,7 @@ from loans.schemas.application import RawApplication, RawValue
 from loans.schemas.documents import UploadedDocument, UploadSlot
 from loans.schemas.outcome import Outcome
 from loans.store import ApplicationStore, filled_slots
+from loans.workflow import receive_application
 
 # What a case mainly tests (one kind per case):
 #   common      a normal, everyday application
@@ -148,14 +149,16 @@ def load_case(folder: Path) -> EvalCase:
 def submit_case(
     store: ApplicationStore, case: EvalCase, application_id: str | None = None
 ) -> str:
-    """Submit a case's application to the store, as at intake, at the case's
-    fixed start time. The application ID is the case ID unless another is
-    given (run.py gives each run's case its own ID, since cases stay in the
-    database). The customer's first message is submitted with it."""
+    """Submit a case's application through the bank's intake
+    (loans.workflow.receive_application), at the case's fixed start time.
+    The application ID is the case ID unless another is given (run.py gives
+    each run's case its own ID, since cases stay in the database). The
+    customer's first message is submitted with it."""
     documents = {
         slot: case.documents[f"{slot}.json"] for slot in filled_slots(case.application)
     }
-    return store.submit(
+    return receive_application(
+        store,
         case.application,
         documents,
         case.info.start_time,

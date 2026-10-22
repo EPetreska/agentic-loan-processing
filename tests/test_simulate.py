@@ -291,10 +291,10 @@ def test_through_mcp_the_agents_events_name_the_model(mcp_url, pg_conn):
 def test_through_mcp_the_tools_really_run_on_the_server(mcp_url, pg_conn):
     # The results are the same either way, so they cannot show which way the
     # tools ran. The session's clock can: only the server's tools and the
-    # workflow move it, a minute per step, so after finish, the credit check
-    # and the offers it stands three minutes past the ending.
+    # workflow move it, a minute per step, so after finish, the credit check,
+    # creating the offer and sending it, it stands four minutes past the ending.
     store, result = through_mcp(mcp_url, pg_conn, "02_maria_job_change", MARIA)
     (clock,) = pg_conn.execute(
         "SELECT clock FROM case_sessions WHERE application_id = %s", (result.application_id,)
     ).fetchone()
-    assert clock == store.get(result.application_id).ending.ended_at + timedelta(minutes=3)
+    assert clock == store.get(result.application_id).ending.ended_at + timedelta(minutes=4)

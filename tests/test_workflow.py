@@ -11,8 +11,9 @@ from conftest import AGENT
 from loans.db.postgres_store import PostgresStore
 from loans.evals.case import load_case, submit_case
 from loans.evals.simulate import SimulatedClock
+from loans.schemas.application import RawFile
 from loans.store import ApplicationStore, CaseEnding
-from loans.workflow import after_application, open_case_for_agent
+from loans.workflow import after_application, open_case_for_agent, receive_reply
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 
@@ -34,7 +35,8 @@ def test_a_complete_case_gets_the_credit_check_and_the_offer():
     stored = store.get(app_id)
     assert stored.credit_check.passed
     assert [o.term_months for o in stored.offers] == [48]
-    assert [e.event for e in stored.audit_log][-2:] == ["credit_checked", "offer_created"]
+    assert [e.event for e in stored.audit_log][-3:] == ["credit_checked", "offer_created", "offer_sent"]
+    assert len(stored.offers_sent) == 1
 
 
 @pytest.mark.parametrize(
@@ -101,3 +103,21 @@ def test_through_mcp_the_session_is_closed_when_the_agent_fails(mcp_url, pg_conn
     with pytest.raises(RuntimeError):
         asyncio.run(fail())
     assert open_sessions(pg_conn) == 0
+
+
+def test_a_reply_is_recorded_with_its_uploads_and_corrections_together():
+    store = ApplicationStore()
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    now = case.info.start_time + timedelta(days=2)
+    new_stub = case.documents["pay_stub_new.json"]
+    file = RawFile(filename="stub.pdf", content_type="application/pdf")
+    receive_reply(store, app_id, now, "Here is my new pay stub.", {"pay_stub": (new_stub, file)}, {"phone": "(312) 555-0100"})
+    stored = store.get(app_id)
+    reply = stored.replies[-1]
+    assert (reply.received_at, reply.message, reply.uploads, reply.corrected_fields) == (
+        now, "Here is my new pay stub.", ["pay_stub"], ["phone"]
+    )
+    assert stored.document_versions["pay_stub"] == 2 and stored.raw.phone == "(312) 555-0100"
+    assert [e.event for e in stored.audit_log][-3:] == ["customer_replied", "document_uploaded", "form_corrected"]
+    assert {e.at for e in stored.audit_log[-3:]} == {now}

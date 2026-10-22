@@ -14,6 +14,7 @@ same; a real lender would adjust the last one for the rounding, a
 simplification here. The agent never calculates an offer.
 """
 
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import BaseModel, TypeAdapter
@@ -67,3 +68,22 @@ def offer_for(form: RawApplication) -> Offer:
     amount = _LOAN_AMOUNT.validate_python(form.loan_amount)
     term = _TERM.validate_python(form.term_months)
     return create_offer(amount, term)
+
+
+def offer_notice(offer: Offer, valid_until: date) -> str:
+    """The offer as the bank sends it to the customer: the numbers
+    truth-in-lending rules require, from a fixed template, never written by
+    an LLM, and how to accept it."""
+    return "\n".join(
+        [
+            "Your loan offer",
+            f"Amount: ${offer.amount:,.2f}",
+            f"Annual percentage rate (APR): {offer.apr * 100:.2f}%",
+            f"Term: {offer.term_months} monthly payments",
+            f"Monthly payment: ${offer.monthly_payment:,.2f}",
+            f"Total of payments: ${offer.total_of_payments:,.2f}",
+            f"Finance charge (interest): ${offer.finance_charge:,.2f}",
+            f"This offer is valid until {valid_until.isoformat()}. To accept it, sign it"
+            " electronically in your online account; a reply by message does not accept it.",
+        ]
+    )

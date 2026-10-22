@@ -139,6 +139,8 @@ class ApprovalRequest(BaseModel):
     # The officer's decision, once made.
     status: Literal["pending", "approved", "declined"] = "pending"
     decided_at: datetime | None = None
+    # Who decided, and their note; kept here, not in the audit log.
+    officer_id: str | None = None
     officer_note: str | None = None
 
 
@@ -155,6 +157,23 @@ class TermsSearch(BaseModel):
     query: str
     # The sections returned, closest first.
     chunk_ids: list[str]
+
+
+class OfferSent(BaseModel):
+    """An offer the bank sent the customer: its formal notice, written by
+    code (loans.offers.offer_notice)."""
+
+    # Which offer of the case's list (0 is the first).
+    offer_index: int
+    sent_at: datetime
+    notice: str
+
+
+class Signature(BaseModel):
+    """The customer's e-signature of an offer, recorded by the system."""
+
+    offer_index: int
+    signed_at: datetime
 
 
 class OfferClosing(BaseModel):
@@ -197,6 +216,11 @@ class StoredApplication(BaseModel):
     # The offers made to the customer, oldest first: the one created after a
     # passed credit check, then any revised offer a loan officer approved.
     offers: list[Offer] = []
+    # The offers sent to the customer, oldest first; only the latest can be
+    # signed.
+    offers_sent: list[OfferSent] = []
+    # The customer's e-signature, once given.
+    signature: Signature | None = None
     # The offer agent's requests to a loan officer, oldest first.
     approval_requests: list[ApprovalRequest] = []
     # The offer agent's searches of the bank's terms and the CFPB's answers,
@@ -426,6 +450,63 @@ class ApplicationStore:
                 "agent",
                 "terms_searched",
                 ", ".join(search.chunk_ids),
+            )
+
+    def record_offer_sent(self, application_id: str, sent: OfferSent) -> None:
+        """Keep the sent offer on file and log it, in one step. The log names
+        the offer and its terms, not the notice."""
+        with self._changing(application_id) as stored:
+            stored.offers_sent.append(sent)
+            offer = stored.offers[sent.offer_index]
+            self.log_event(
+                application_id,
+                sent.sent_at,
+                "system",
+                "offer_sent",
+                f"offer {sent.offer_index + 1}: ${offer.amount:,.0f}, {offer.term_months} months",
+            )
+
+    def record_signature(self, application_id: str, signature: Signature) -> None:
+        """Keep the customer's signature on file and close the offer phase as
+        accepted, in one step."""
+        with self._changing(application_id) as stored:
+            stored.signature = signature
+            stored.offer_closing = OfferClosing(outcome="accepted", closed_at=signature.signed_at)
+            self.log_event(
+                application_id,
+                signature.signed_at,
+                "customer",
+                "offer_signed",
+                f"offer {signature.offer_index + 1}",
+            )
+            self.log_event(application_id, signature.signed_at, "system", "offer_closed", "accepted")
+
+    def record_approval_decision(
+        self,
+        application_id: str,
+        request_id: str,
+        status: Literal["approved", "declined"],
+        officer_id: str,
+        note: str,
+        decided_at: datetime,
+    ) -> None:
+        """Keep the officer's decision on the request and log it, in one
+        step. The log names the officer and the decision, not the note."""
+        with self._changing(application_id) as stored:
+            number, request = next(
+                (n, r) for n, r in enumerate(stored.approval_requests, start=1)
+                if r.request_id == request_id
+            )  # fmt: skip
+            request.status = status
+            request.decided_at = decided_at
+            request.officer_id = officer_id
+            request.officer_note = note
+            self.log_event(
+                application_id,
+                decided_at,
+                "human",
+                "approval_decided",
+                f"{officer_id}: request {number} {status}",
             )
 
     def record_offer_closing(self, application_id: str, closing: OfferClosing) -> None:

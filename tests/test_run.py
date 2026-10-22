@@ -191,7 +191,9 @@ def test_a_run_through_mcp_leaves_its_files(monkeypatch, tmp_path, mcp_url, pg_c
 
     (case_dir,) = tmp_path.glob("*/02_maria_job_change@*")  # one folder, named by the run's ID
     events = read_audit_log(case_dir / "audit.jsonl")
-    assert [e.event for e in events][-3:] == ["application_completed", "credit_checked", "offer_created"]
+    assert [e.event for e in events][-4:] == [
+        "application_completed", "credit_checked", "offer_created", "offer_sent"
+    ]
     assert {e.model for e in events if e.actor == "agent"} == {"fake:model"}
     assert json.loads((case_dir / "conversation.json").read_text())[1]["from"] == "agent"
     out = capsys.readouterr().out

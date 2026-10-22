@@ -74,8 +74,8 @@ def simulate(case_name, answers):
 def test_a_complete_case_gets_its_offer():
     stored = simulate("02_maria_job_change", MARIA)
     assert [o.term_months for o in stored.offers] == [48]
-    event = stored.audit_log[-1]
-    assert (event.actor, event.event, event.details) == ("system", "offer_created", "48 months")
+    event = next(e for e in stored.audit_log if e.event == "offer_created")
+    assert (event.actor, event.details) == ("system", "48 months")
     assert event.at > stored.credit_check.checked_at
 
 
