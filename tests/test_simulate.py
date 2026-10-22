@@ -482,3 +482,51 @@ def test_through_mcp_each_agent_had_its_own_session(mcp_url, pg_conn):
         ("05_maria_asks_and_signs",),
     ).fetchall()
     assert rows == [("application", APPLICATION_PROMPT_VERSION), ("offer", offer_prompt.PROMPT_VERSION)]
+
+
+# A case that starts at the offer phase: case 09, the offer agent only.
+
+LATE_FEE_ANSWER = "A payment more than 15 days late has a $25 late fee, according to the bank's loan terms."
+OFFER_AGENT_ONLY = [
+    step("retrieve_documents", {"query": "late payment fee"}, "o1"),
+    step("send_message", {"text": LATE_FEE_ANSWER, "reason": "She asked about paying late."}, "o2"),
+    wait(),
+]
+
+
+def test_a_case_can_start_at_the_offer_phase():
+    # Only the offer agent's answers: an application agent step would
+    # consume them and the offer phase would run out.
+    _, case, stored, result = full_flow(OFFER_AGENT_ONLY, case_name="09_offer_late_fee_question")
+    assert case.info.starts_at == "offer"
+    assert (result.thread_id, result.messages, result.pauses) == (None, [], 0)
+    assert stored.offer_closing.outcome == case.info.expected.offer_outcome == "accepted"
+    assert [m.text for m in stored.messages] == [LATE_FEE_ANSWER]
+    assert result.offer_thread_id == "09_offer_late_fee_question/offer"
+
+
+def test_the_setup_is_logged_as_setup_not_as_an_agents_work():
+    _, _, stored, _ = full_flow(OFFER_AGENT_ONLY, case_name="09_offer_late_fee_question")
+    events = [(e.actor, e.event) for e in stored.audit_log]
+    assert events[:5] == [
+        ("system", "application_submitted"),
+        ("system", "eval_setup"),
+        ("system", "credit_checked"),
+        ("system", "offer_created"),
+        ("system", "offer_sent"),
+    ]
+    assert stored.ending.call_id == "eval-setup"
+    assert ("agent", "application_completed") not in events
+    assert {e.event for e in stored.audit_log if e.actor == "agent"} == {"documents_retrieved", "message_sent"}
+
+
+def test_through_mcp_a_case_that_starts_at_the_offer_phase_ends_as_without(mcp_url, pg_conn):
+    store, result = through_mcp(mcp_url, pg_conn, "09_offer_late_fee_question", OFFER_AGENT_ONLY)
+    direct = ApplicationStore(agent=AGENT)
+    run_simulation(load_case(CASES / "09_offer_late_fee_question"), direct,
+                   FakeModel(messages=iter(OFFER_AGENT_ONLY)), search=lambda q: [SECTION])  # fmt: skip
+    assert store.get(result.application_id) == direct.get(result.application_id)
+    rows = pg_conn.execute(
+        "SELECT agent_name FROM case_sessions WHERE application_id = %s", (result.application_id,)
+    ).fetchall()
+    assert rows == [("offer",)]  # no session was opened for the application agent

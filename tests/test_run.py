@@ -274,3 +274,13 @@ def test_a_direct_offer_phase_without_postgres_says_how_to_start_it(monkeypatch)
     monkeypatch.setenv("DATABASE_URL", "postgresql://loans@127.0.0.1:9/loans")  # nothing listens there
     with pytest.raises(SystemExit, match="docker compose up -d"):
         run.open_document_search()
+
+
+def test_a_run_that_starts_at_the_offer_phase_says_so(monkeypatch, tmp_path, capsys):
+    from test_simulate import OFFER_AGENT_ONLY
+
+    run_directly(monkeypatch, tmp_path, "09_offer_late_fee_question", OFFER_AGENT_ONLY)
+    out = capsys.readouterr().out
+    assert "set up as completed for this eval; the application agent did not run" in out
+    assert "ended: complete" not in out
+    assert "offer phase closed: accepted" in out

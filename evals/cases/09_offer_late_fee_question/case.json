@@ -1,0 +1,12 @@
+{
+  "title": "A question about late payments, then a signature (offer agent only)",
+  "kind": "common",
+  "description": "Starts at the offer phase: the application is set up as completed, without the application agent, and the bank sends the offer the customer asked for ($15,000 over 48 months). A day later she asks what happens if she pays late one month. The offer agent should look it up and answer from the bank's loan terms (a late fee of $25 if a payment is more than 15 days late), naming the source, and not from a CFPB answer about another product. Two days after that answer she signs the offer.",
+  "start_time": "2026-09-14T15:00:00Z",
+  "starts_at": "offer",
+  "expected": {
+    "outcome": "complete",
+    "reason": "all_checks_passed",
+    "offer_outcome": "accepted"
+  }
+}

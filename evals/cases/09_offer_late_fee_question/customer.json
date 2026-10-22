@@ -1,0 +1,8 @@
+{
+  "offer_phase": {
+    "messages": [
+      {"after_days": 1, "message": "What happens if I pay late one month?"}
+    ],
+    "signs_after_days": 2
+  }
+}

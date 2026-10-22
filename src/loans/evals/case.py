@@ -69,6 +69,10 @@ class CaseInfo(Strict):
     description: str = ""
     # The moment the application is submitted. Fixed, so results repeat.
     start_time: datetime
+    # Where the case starts: with the application (the application agent
+    # runs), or at the offer phase (the application is set up as completed,
+    # without the application agent, so only the offer agent is evaluated).
+    starts_at: Literal["application", "offer"] = "application"
     expected: Expected
 
     @field_validator("start_time")

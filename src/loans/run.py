@@ -353,8 +353,11 @@ def main(argv: list[str] | None = None) -> None:
     print(f"case: {case.case_id}  model: {model_spec}  prompt: {PROMPT_VERSION}{offer_prompt}")
     print(f"application: {application_id}  tools: {through}")
     print(f"pauses to wait for the customer: {result.pauses}")
-    if stored.ending is not None:
+    if case.info.starts_at == "offer":
+        print("application: set up as completed for this eval; the application agent did not run")
+    elif stored.ending is not None:
         print(f"ended: {stored.ending.outcome} ({stored.ending.reason})")
+    if stored.ending is not None:
         if stored.credit_check is not None:
             print(f"credit check: {'passed' if stored.credit_check.passed else 'not passed'}")
         for offer in stored.offers:

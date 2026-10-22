@@ -29,6 +29,12 @@ When the agent ends the case, the workflow runs the bank's next steps
 (loans.workflow.after_application): the credit check and, if it passes, the
 offer, sent at once.
 
+A case can also start at the offer phase (case.json's starts_at: "offer"):
+the application is then set up as completed without the application agent,
+logged as eval setup, and the bank's steps and the offer phase follow as
+below. This evaluates the offer agent alone, without spending the
+application agent's run on every case.
+
 If the case's script goes on after the offer (customer.json's offer_phase),
 the simulation then plays the offer phase with the offer agent, on its own
 thread: each scripted message from the customer starts the offer agent (the
@@ -81,7 +87,7 @@ from loans.agents.offer.graph import build_offer_graph
 from loans.checks.ending import last_contact
 from loans.evals.case import EvalCase, OfferPhaseScript, OfficerScript, Reply, submit_case
 from loans.schemas.application import RawFile
-from loans.store import ApplicationStore
+from loans.store import ApplicationStore, CaseEnding
 from loans.workflow import (
     Search,
     after_application,
@@ -126,8 +132,9 @@ class SimulatedClock:
 @dataclass
 class SimulationResult:
     application_id: str
-    # The checkpointer thread the conversation was kept under.
-    thread_id: str
+    # The checkpointer thread the application agent's conversation was kept
+    # under (None for a case that starts at the offer phase).
+    thread_id: str | None
     # The whole conversation the agent saw, oldest first.
     messages: list[BaseMessage]
     # How many times the agent stopped to wait.
@@ -175,6 +182,11 @@ async def simulate_case(
     search is the document search the offer agent uses directly (needed only
     for a case with an offer phase; through MCP the server runs it)."""
     application_id = submit_case(store, case, application_id)
+    if case.info.starts_at == "offer":
+        return await _start_at_offer(
+            case, store, application_id, model, config, on_message, on_token,
+            thread_id or application_id, mcp_url, search,
+        )  # fmt: skip
     thread_id_base = thread_id or application_id
     config = {**(config or {}), **thread_config(thread_id_base, "application")}
     thread_id = config["configurable"]["thread_id"]
@@ -222,15 +234,80 @@ async def simulate_case(
 
     # The application agent's access is closed; the offer phase opens the
     # case again, for the offer agent.
+    base_config = {k: v for k, v in config.items() if k != "configurable"}
+    await _offer_phase_if_scripted(
+        case, store, result, model, base_config, on_message, on_token, thread_id_base, mcp_url, search
+    )
+    return result
+
+
+async def _offer_phase_if_scripted(
+    case: EvalCase,
+    store: ApplicationStore,
+    result: SimulationResult,
+    model: BaseChatModel,
+    base_config: dict,
+    on_message: Callable[[BaseMessage], None] | None,
+    on_token: Callable[[str, str], None] | None,
+    thread_id_base: str,
+    mcp_url: str | None,
+    search: Search | None,
+) -> None:
+    """The offer phase, if the case's script has one and an offer was sent;
+    the offer agent's thread and conversation go into result."""
     script = case.customer.offer_phase
-    if script is not None and store.get(application_id).offers_sent:
-        base_config = {k: v for k, v in config.items() if k != "configurable"}
-        offer_config = {**base_config, **thread_config(thread_id_base, "offer")}
-        result.offer_messages = await _simulate_offer_phase(
-            store, application_id, script, case.officer, model, mcp_url, search, offer_config, on_message, on_token
-        )
-        if result.offer_messages:
-            result.offer_thread_id = offer_config["configurable"]["thread_id"]
+    if script is None or not store.get(result.application_id).offers_sent:
+        return
+    offer_config = {**base_config, **thread_config(thread_id_base, "offer")}
+    result.offer_messages = await _simulate_offer_phase(
+        store, result.application_id, script, case.officer, model, mcp_url, search,
+        offer_config, on_message, on_token,
+    )  # fmt: skip
+    if result.offer_messages:
+        result.offer_thread_id = offer_config["configurable"]["thread_id"]
+
+
+# The ending recorded for a case that starts at the offer phase.
+EVAL_SETUP_CALL_ID = "eval-setup"
+
+
+async def _start_at_offer(
+    case: EvalCase,
+    store: ApplicationStore,
+    application_id: str,
+    model: BaseChatModel,
+    config: dict | None,
+    on_message: Callable[[BaseMessage], None] | None,
+    on_token: Callable[[str, str], None] | None,
+    thread_id_base: str,
+    mcp_url: str | None,
+    search: Search | None,
+) -> SimulationResult:
+    """A case that starts at the offer phase: the application is set up as
+    completed, marked as eval setup in the audit log (actor "system", never
+    the agent), then the bank's steps run as after a real completion (the
+    credit check, the offer sent), and the offer phase follows."""
+    clock = SimulatedClock(case.info.start_time)
+    now = clock()
+    store.record_ending(
+        application_id,
+        CaseEnding(
+            call_id=EVAL_SETUP_CALL_ID,
+            outcome="complete",
+            reason="all_checks_passed",
+            explanation="Set up as completed for an eval that starts at the offer phase; no agent ran.",
+            ended_at=now,
+        ),
+    )
+    store.log_event(
+        application_id, now, "system", "eval_setup",
+        "the application set up as completed; the application agent did not run",
+    )  # fmt: skip
+    after_application(store, application_id, clock)
+    result = SimulationResult(application_id, None, [], 0, False)
+    await _offer_phase_if_scripted(
+        case, store, result, model, dict(config or {}), on_message, on_token, thread_id_base, mcp_url, search
+    )
     return result
 
 

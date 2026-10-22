@@ -56,6 +56,8 @@ EventName = Literal[
     # the offer agent (it also uses message_sent)
     "approval_requested",
     "documents_retrieved",
+    # the evals: a case set up to start later in the process
+    "eval_setup",
 ]
 
 
