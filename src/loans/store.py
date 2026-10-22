@@ -142,6 +142,21 @@ class ApprovalRequest(BaseModel):
     officer_note: str | None = None
 
 
+class TermsSearch(BaseModel):
+    """A search of the bank's terms and the CFPB's answers by the offer
+    agent, kept on file so a reviewer can see what it searched for and what
+    it got back. The query is kept here, not in the audit log, like the text
+    of a message."""
+
+    # The ID of the tool call, so a retried search is not recorded twice.
+    search_id: str
+    searched_at: datetime
+    # What the agent searched for, in its own words.
+    query: str
+    # The sections returned, closest first.
+    chunk_ids: list[str]
+
+
 class OfferClosing(BaseModel):
     """How the offer phase closed, recorded by the bank's workflow: the
     customer signed the offer (accepted), or its deadline passed (expired)."""
@@ -184,6 +199,9 @@ class StoredApplication(BaseModel):
     offers: list[Offer] = []
     # The offer agent's requests to a loan officer, oldest first.
     approval_requests: list[ApprovalRequest] = []
+    # The offer agent's searches of the bank's terms and the CFPB's answers,
+    # oldest first.
+    terms_searches: list[TermsSearch] = []
     # Set once the offer phase has closed. The offer agent's tools refuse
     # from then on, as the application agent's do after its ending.
     offer_closing: OfferClosing | None = None
@@ -395,6 +413,19 @@ class ApplicationStore:
                 "approval_requested",
                 f"request {len(stored.approval_requests)}",
                 request.reason,
+            )
+
+    def record_terms_search(self, application_id: str, search: TermsSearch) -> None:
+        """Keep the search on file and log it, in one step. The log names the
+        sections returned, never the query."""
+        with self._changing(application_id) as stored:
+            stored.terms_searches.append(search)
+            self.log_event(
+                application_id,
+                search.searched_at,
+                "agent",
+                "terms_searched",
+                ", ".join(search.chunk_ids),
             )
 
     def record_offer_closing(self, application_id: str, closing: OfferClosing) -> None:

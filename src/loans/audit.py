@@ -33,22 +33,24 @@ EventName = Literal[
     "document_uploaded",
     "form_corrected",
     "customer_replied",
-    # agent
+    # the application agent
     "form_checked",
     "document_read",
     "identity_checked",
     "message_sent",
     "income_verified",
-    "approval_requested",
     "application_completed",
     "application_cancelled",
     "sent_to_human",
     # guardrail
     "action_blocked",
-    # the bank's workflow, after the agent
+    # the bank's workflow, after the application
     "credit_checked",
     "offer_created",
     "offer_closed",
+    # the offer agent (it also uses message_sent)
+    "approval_requested",
+    "terms_searched",
 ]
 
 
