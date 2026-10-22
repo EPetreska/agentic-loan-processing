@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from conftest import AGENT
 from loans import run
+from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.audit import read_audit_log
 from loans.evals.case import load_case, submit_case
 from loans.run import LivePrinter, conversation, format_message, write_conversation
@@ -200,3 +201,76 @@ def test_a_run_through_mcp_leaves_its_files(monkeypatch, tmp_path, mcp_url, pg_c
     assert "ended: complete (all_checks_passed)" in out and f"MCP server at {mcp_url}" in out
     assert "credit check: passed" in out
     assert "offer: 48 months at 10.99% APR: $387.61 a month" in out
+
+
+
+# The offer phase in a run: cases 05 to 08 go on after the application.
+
+
+class ClosedOnce:
+    """A stand-in for the search's database connection, which the run closes."""
+
+    closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def run_directly(monkeypatch, tmp_path, case_name, answers):
+    from test_simulate import SECTION, FakeModel
+
+    conn = ClosedOnce()
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run, "make_model", lambda spec: FakeModel(messages=iter(answers)))
+    monkeypatch.setattr(run, "open_document_search", lambda: (conn, lambda query: [SECTION]))
+    run.main([case_name, "--model", "fake:model", "--direct"])
+    (case_dir,) = tmp_path.glob(f"*/{case_name}@*")
+    return conn, case_dir
+
+
+def test_a_direct_run_shows_the_offer_phase(monkeypatch, tmp_path, capsys):
+    from test_simulate import MARIA, OFFER_AGENT
+
+    conn, case_dir = run_directly(monkeypatch, tmp_path, "05_maria_asks_and_signs", MARIA + OFFER_AGENT)
+    out = capsys.readouterr().out
+    assert f"offer prompt: {OFFER_PROMPT_VERSION}" in out
+    assert "offer 1 sent on 2026-09-16: $15,000, 48 months" in out
+    assert "documents retrieved for 'prepayment penalty': bank-07" in out
+    assert "signed: offer 1 on" in out and "offer phase closed: accepted on" in out
+    assert conn.closed  # the search's connection is closed at the end
+    entries = json.loads((case_dir / "conversation.json").read_text())
+    assert [e.get("agent") for e in entries if e["from"] == "agent"] == ["application", "offer"]
+
+
+def test_a_direct_run_shows_the_officers_decision(monkeypatch, tmp_path, capsys):
+    from test_simulate import MARIA, asks_officer
+
+    answers = MARIA + asks_officer("Borrow $12,000.", "A loan officer will decide.", "Approved.")
+    run_directly(monkeypatch, tmp_path, "07_maria_asks_for_less", answers)
+    out = capsys.readouterr().out
+    assert "request 1 to a loan officer: approved by officer-17" in out
+    assert "offer 2 sent on" in out and ": $12,000, 48 months" in out
+    assert "signed: offer 2 on" in out
+
+
+def test_a_case_without_an_offer_phase_needs_no_search(monkeypatch, tmp_path, capsys):
+    from test_simulate import MARIA, FakeModel
+
+    def no_search():
+        raise AssertionError("the search was opened")
+
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setattr(run, "RUNS", tmp_path)
+    monkeypatch.setattr(run, "make_model", lambda spec: FakeModel(messages=iter(MARIA)))
+    monkeypatch.setattr(run, "open_document_search", no_search)
+    run.main(["02_maria_job_change", "--model", "fake:model", "--direct"])
+    out = capsys.readouterr().out
+    assert "offer prompt:" not in out and "offer phase closed" not in out
+    assert "offer 1 sent on" in out  # the offer is still sent by the bank
+
+
+def test_a_direct_offer_phase_without_postgres_says_how_to_start_it(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://loans@127.0.0.1:9/loans")  # nothing listens there
+    with pytest.raises(SystemExit, match="docker compose up -d"):
+        run.open_document_search()

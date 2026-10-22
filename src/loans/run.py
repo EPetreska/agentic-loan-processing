@@ -14,7 +14,10 @@ token for this one case. Postgres and the server must be running first:
 
 With --direct, everything runs inside this program instead: the case is kept
 in memory and the tools run here, with no database and no server. Quicker for
-trying a change; the LLM sees the same tools and the same rules apply.
+trying a change; the LLM sees the same tools and the same rules apply. A case
+that goes on to the offer phase (05 to 08) still needs Postgres with --direct,
+for the offer agent's document search: the RAG sections are kept there (see
+loans.rag.index), and the search needs Ollama for the query's embedding.
 
 With --show, the run is printed as it happens: the agent's thinking (for
 models that think out loud) and text word by word while the model writes
@@ -22,15 +25,16 @@ them, then its tool calls, the tool results, and the messages that start and
 resume the case. The thinking is the model's own
 account, a useful view but not a guaranteed record of why it acted.
 
-Submits the case's application, runs the agent on it, and prints the result
-and the audit log as a table. Cases stay in the database, so each run's case
+Submits the case's application, runs the agent on it (and, for a case that
+goes on after the offer, the offer agent), and prints the result, the offer
+phase and the audit log as a table. Cases stay in the database, so each run's case
 gets its own application ID, the case ID with the run time:
 02_maria_job_change@2026-10-21T15-00-00. Each run gets a folder, with one
 folder per case inside:
 
     runs/<run time>/<application ID>/
         audit.jsonl          the audit log
-        conversation.json    the messages between the agent and the customer
+        conversation.json    the messages between the agents and the customer
 
 Both are written at the end, also if the run fails halfway, from the case as
 kept in Postgres, where every event is recorded the moment it happens (with
@@ -68,12 +72,15 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from loans.agents.loop import make_model
 from loans.agents.application.prompt import PROMPT_VERSION
+from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log, write_audit_log
 from loans.db.postgres_store import PostgresStore, connect, create_tables, database_conninfo
 from loans.evals.case import load_case
 from loans.evals.simulate import simulate_case
+from loans.workflow import Search
 from loans.keyring import API_KEYS, keyring_lookup
 from loans.mcp.client import server_is_running
+from loans.rag.search import search as rag_search
 from loans.store import ApplicationStore, StoredApplication
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -108,9 +115,16 @@ MAX_STEPS = 60
 
 
 def conversation(stored: StoredApplication) -> list[dict]:
-    """The messages between the agent and the customer, oldest first, as the
+    """The messages between the agents and the customer, oldest first, as the
     bank has them on file: the customer's message sent with the application,
-    the agent's messages and the customer's replies."""
+    the agents' messages and the customer's replies. Each agent message says
+    which agent wrote it: the offer agent writes only after the offer was
+    sent, the application agent only before."""
+    offer_sent_at = stored.offers_sent[0].sent_at if stored.offers_sent else None
+
+    def which_agent(sent_at) -> str:
+        return "offer" if offer_sent_at is not None and sent_at >= offer_sent_at else "application"
+
     entries = []
     if stored.first_message:
         entries.append(
@@ -122,7 +136,13 @@ def conversation(stored: StoredApplication) -> list[dict]:
             }
         )
     entries += [
-        {"at": m.sent_at, "from": "agent", "text": m.text, "reason": m.reason}
+        {
+            "at": m.sent_at,
+            "from": "agent",
+            "agent": which_agent(m.sent_at),
+            "text": m.text,
+            "reason": m.reason,
+        }
         for m in stored.messages
     ]
     entries += [
@@ -217,6 +237,40 @@ def open_bank_store(agent: AgentVersion) -> PostgresStore:
     return PostgresStore(conn, agent=agent)
 
 
+def open_document_search() -> tuple[psycopg.Connection, Search]:
+    """For a direct run with an offer phase: a connection to Postgres, where
+    the RAG sections are kept, and the offer agent's search on it. Stops
+    with what to start if Postgres is not running."""
+    try:
+        conn = connect(database_conninfo(connect_timeout=3))
+    except psycopg.OperationalError:
+        sys.exit(
+            "this case has an offer phase, and the offer agent's document search needs Postgres "
+            "(the RAG sections are kept there); start it with: docker compose up -d"
+        )
+    return conn, lambda query: rag_search(conn, query)
+
+
+def print_offer_phase(stored: StoredApplication) -> None:
+    """The offer phase in short: the offers sent, the document searches, the
+    requests to a loan officer and their decisions, and how it closed."""
+    for sent in stored.offers_sent:
+        offer = stored.offers[sent.offer_index]
+        print(
+            f"offer {sent.offer_index + 1} sent on {sent.sent_at.date()}: "
+            f"${offer.amount:,}, {offer.term_months} months"
+        )
+    for retrieval in stored.document_retrievals:
+        print(f"documents retrieved for {retrieval.query!r}: {', '.join(retrieval.chunk_ids)}")
+    for number, request in enumerate(stored.approval_requests, start=1):
+        decided = f" by {request.officer_id}" if request.officer_id else ""
+        print(f"request {number} to a loan officer: {request.status}{decided}")
+    if stored.signature is not None:
+        print(f"signed: offer {stored.signature.offer_index + 1} on {stored.signature.signed_at.date()}")
+    if stored.offer_closing is not None:
+        print(f"offer phase closed: {stored.offer_closing.outcome} on {stored.offer_closing.closed_at.date()}")
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Run one eval case with the agent.")
@@ -257,6 +311,10 @@ def main(argv: list[str] | None = None) -> None:
     application_id = f"{case.case_id}@{run_dir.name}"
     case_dir = run_dir / application_id
     printer = LivePrinter()
+    # Directly, the offer agent's search runs here; through MCP, on the server.
+    search_conn, search = None, None
+    if args.direct and case.customer.offer_phase is not None:
+        search_conn, search = open_document_search()
     try:
         result = asyncio.run(
             simulate_case(
@@ -267,14 +325,21 @@ def main(argv: list[str] | None = None) -> None:
                     "recursion_limit": MAX_STEPS,
                     "run_name": f"case {case.case_id}",
                     "tags": [case.case_id],
-                    "metadata": {"model": model_spec, "prompt_version": PROMPT_VERSION},
+                    "metadata": {
+                        "model": model_spec,
+                        "prompt_version": PROMPT_VERSION,
+                        "offer_prompt_version": OFFER_PROMPT_VERSION,
+                    },
                 },
                 **({"on_message": printer.message, "on_token": printer.token} if args.show else {}),
                 application_id=application_id,
                 mcp_url=mcp_url,
+                search=search,
             )
         )
     finally:
+        if search_conn is not None:
+            search_conn.close()
         # Also if the run fails halfway, what happened so far is kept.
         if store.has(application_id):
             stored = store.get(application_id)
@@ -284,7 +349,8 @@ def main(argv: list[str] | None = None) -> None:
 
     stored = store.get(result.application_id)
     through = "direct" if args.direct else f"MCP server at {mcp_url}"
-    print(f"case: {case.case_id}  model: {model_spec}  prompt: {PROMPT_VERSION}")
+    offer_prompt = f"  offer prompt: {OFFER_PROMPT_VERSION}" if result.offer_messages else ""
+    print(f"case: {case.case_id}  model: {model_spec}  prompt: {PROMPT_VERSION}{offer_prompt}")
     print(f"application: {application_id}  tools: {through}")
     print(f"pauses to wait for the customer: {result.pauses}")
     if stored.ending is not None:
@@ -297,6 +363,7 @@ def main(argv: list[str] | None = None) -> None:
                 f"${offer.monthly_payment:,} a month, ${offer.total_of_payments:,} in total "
                 f"(${offer.finance_charge:,} interest) for ${offer.amount:,}"
             )
+        print_offer_phase(stored)
     else:
         if result.stopped_by_limit:
             print("not ended: the agent kept waiting, so the simulation stopped")
