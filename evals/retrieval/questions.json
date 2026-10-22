@@ -1,0 +1,29 @@
+{
+  "about": "Customer questions for the retrieval eval, written as customers ask them, not copying the section headings. 'expected' lists every section that answers the question; 'about' is 'loan' for questions about this bank's loan (answered by the bank's terms) or 'general' (answered by a CFPB answer). A note marks a trap: a section about another product that competes with the right one.",
+  "questions": [
+    {"question": "Is there a fee if I pay off the loan early?", "expected": ["bank-07", "bank-12", "bank-11"], "about": "loan", "note": "trap: the CFPB answer on mortgage prepayment penalties"},
+    {"question": "What happens if I pay late one month?", "expected": ["bank-06", "bank-13"], "about": "loan", "note": "trap: the CFPB answer on car loan late fees"},
+    {"question": "How much is the late fee?", "expected": ["bank-06", "bank-13", "bank-11"], "about": "loan", "note": "trap: the CFPB answer on car loan late fees"},
+    {"question": "Can my interest rate go up later?", "expected": ["bank-10", "bank-03"], "about": "loan", "note": "trap: the CFPB answers on variable APRs and adjustable-rate mortgages"},
+    {"question": "Do you charge an origination fee?", "expected": ["bank-03", "bank-11"], "about": "loan", "note": "trap: the CFPB answer on installment loan fees"},
+    {"question": "Will I pay less interest if I set up automatic payments?", "expected": ["bank-15", "bank-05"], "about": "loan", "note": "trap: the CFPB answers on automatic payments"},
+    {"question": "Can I move the day my payment is due?", "expected": ["bank-14", "bank-05"], "about": "loan"},
+    {"question": "How long do I have to accept the offer?", "expected": ["bank-16", "bank-04"], "about": "loan"},
+    {"question": "I replied yes to your email. Is my loan accepted now?", "expected": ["bank-17"], "about": "loan"},
+    {"question": "Could I borrow more than you offered me?", "expected": ["bank-18"], "about": "loan"},
+    {"question": "I lost my job and might miss a payment. What can I do?", "expected": ["bank-08", "bank-19"], "about": "loan", "note": "trap: the CFPB answers on car, mortgage and student loan payments"},
+    {"question": "Which loan length gets the cheapest rate?", "expected": ["bank-20", "bank-03"], "about": "loan"},
+    {"question": "Why is the APR on my offer the same as the interest rate?", "expected": ["bank-09", "bank-03"], "about": "loan", "note": "trap: the CFPB answers on interest rate versus APR, for loans and mortgages"},
+    {"question": "Do I need to put up my car or my house as security?", "expected": ["bank-02"], "about": "loan"},
+    {"question": "What do all the numbers on my offer mean?", "expected": ["bank-04"], "about": "loan"},
+    {"question": "Is my payment the same amount every month?", "expected": ["bank-05"], "about": "loan"},
+    {"question": "What does debt-to-income ratio mean?", "expected": ["cfpb-1791-1"], "about": "general"},
+    {"question": "Will applying for a loan hurt my credit score?", "expected": ["cfpb-1317-1"], "about": "general", "note": "near miss: the CFPB answer on requesting your own credit report"},
+    {"question": "How can I get my credit report for free?", "expected": ["cfpb-5-1", "cfpb-5-2"], "about": "general"},
+    {"question": "How long does a late payment stay on my credit report?", "expected": ["cfpb-323-1", "cfpb-323-2"], "about": "general"},
+    {"question": "Can a lender turn me down because of my age?", "expected": ["cfpb-1181-1", "cfpb-1171-3"], "about": "general"},
+    {"question": "How do I freeze my credit?", "expected": ["cfpb-1341-1", "cfpb-1341-2", "cfpb-1341-3"], "about": "general"},
+    {"question": "Is it a good idea to use a loan to pay off my credit cards?", "expected": ["cfpb-1861-1", "cfpb-1861-2", "cfpb-1861-3", "cfpb-1861-4", "cfpb-1449-5"], "about": "general"},
+    {"question": "What is the difference between a fixed and a variable APR?", "expected": ["cfpb-45-1"], "about": "general"}
+  ]
+}
