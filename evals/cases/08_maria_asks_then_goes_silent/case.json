@@ -1,0 +1,13 @@
+{
+  "title": "Maria asks about the offer, then never signs; the offer expires",
+  "kind": "disruption",
+  "description": "A full flow with both agents. Maria changed jobs in March and got a raise last month; the application agent should complete her application after her new pay stub arrives. The bank then sends her the offer she asked for ($15,000 over 48 months). A day later she asks whether there is a fee for paying the loan off early; the offer agent should look it up in the bank's loan terms and answer. She then never writes or signs again. Thirty days after the offer was sent, the bank closes the offer phase as expired, and the offer agent's paused run is ended. The offer agent should not chase her: it waits for the customer.",
+  "start_time": "2026-09-14T15:00:00Z",
+  "expected": {
+    "outcome": "complete",
+    "reason": "all_checks_passed",
+    "income_verified": true,
+    "must_request": ["pay_stub"],
+    "offer_outcome": "expired"
+  }
+}

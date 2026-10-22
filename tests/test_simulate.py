@@ -352,6 +352,25 @@ def test_she_signs_two_days_after_the_agent_passes_on_the_decision():
     assert stored.signature.signed_at == stored.messages[-1].sent_at + timedelta(days=2)
 
 
+# Expiry: case 08, a question, then silence.
+
+
+def test_without_a_signature_the_offer_expires_after_30_days():
+    _, case, stored, _ = full_flow(case_name="08_maria_asks_then_goes_silent")
+    assert stored.signature is None
+    assert stored.offer_closing.outcome == case.info.expected.offer_outcome == "expired"
+    assert stored.offer_closing.closed_at == stored.offers_sent[0].sent_at + timedelta(days=30)
+    assert [e.event for e in stored.audit_log][-1] == "offer_closed"
+
+
+def test_after_expiry_the_offer_agents_run_is_ended_without_the_llm():
+    # The fake LLM has no answer left after OFFER_AGENT: a further call would fail.
+    _, _, stored, result = full_flow(case_name="08_maria_asks_then_goes_silent")
+    expected = offer_prompt.closed_turn("expired", stored.offer_closing.closed_at.date())
+    assert result.offer_messages[-1].content == expected
+    assert "the offer expired without a signature" in expected
+
+
 def test_a_case_without_an_offer_phase_stops_after_the_application():
     store, _, result = simulate("02_maria_job_change", MARIA)
     stored = store.get(result.application_id)

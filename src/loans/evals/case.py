@@ -111,12 +111,13 @@ class OfferMessage(Strict):
 
 class OfferPhaseScript(Strict):
     """The customer's part after the offer was sent: messages to the bank,
-    one at a time, then the signature."""
+    one at a time, then the signature, or none."""
 
     messages: list[OfferMessage] = Field(default_factory=list)
     # Days after the agent's last message (or the offer, if the customer
-    # never wrote) when the customer signs the latest offer.
-    signs_after_days: float = Field(ge=0)
+    # never wrote) when the customer signs the latest offer. None: the
+    # customer never signs, and the offer expires.
+    signs_after_days: float | None = Field(default=None, ge=0)
 
 
 class CustomerScript(Strict):

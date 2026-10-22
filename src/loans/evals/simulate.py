@@ -33,16 +33,18 @@ If the case's script goes on after the offer (customer.json's offer_phase),
 the simulation then plays the offer phase with the offer agent, on its own
 thread: each scripted message from the customer starts the offer agent (the
 first, together with the offer) or resumes it, and the agent runs until it
-pauses. Then the customer signs the latest offer; the workflow closes the
-offer phase as accepted (loans.workflow.sign_offer), and the offer agent's
-paused run is ended without the LLM (loans.agents.loop.end_run).
+pauses. Then the customer signs the latest offer, and the workflow closes
+the offer phase as accepted (loans.workflow.sign_offer); or, if the script
+has no signature, the clock moves to the end of the offer's validity and the
+workflow closes it as expired (loans.workflow.expire_if_due). Either way the
+offer agent's paused run is ended without the LLM (loans.agents.loop.end_run).
 
 The loan officer is scripted too (the case's officer.json): whenever the
 offer agent pauses with a request waiting, the officer decides it after the
 script's delay, through the workflow (loans.workflow.decide_approval; an
 approval creates and sends the revised offer), and the agent is resumed
 with the decision. For now the offer agent works only directly (no MCP
-server), and the customer always signs; expiry comes later. Time is simulated: the clock starts at the case's
+server). Time is simulated: the clock starts at the case's
 start time and moves one minute per tool call, plus the jumps above.
 
 A pause is the run stopping in the agent loop's wait box; the checkpointer
@@ -85,9 +87,11 @@ from loans.workflow import (
     Search,
     after_application,
     decide_approval,
+    expire_if_due,
     open_case_for_agent,
     receive_reply,
     sign_offer,
+    valid_until,
 )
 
 # The most times the agent may stop to wait before the simulation gives up.
@@ -248,8 +252,9 @@ async def _simulate_offer_phase(
     ones. Whenever the agent pauses with a request waiting and the officer's
     script has a decision left, the officer decides (decide_approval) and the
     agent is resumed with the decision. Then the customer signs the latest
-    offer (sign_offer), and the offer agent's paused run is ended without the
-    LLM (end_run). Returns the offer agent's conversation (empty if the
+    offer (sign_offer), or never signs and the offer expires (expire_if_due,
+    once the offer's validity has passed), and the offer agent's paused run
+    is ended without the LLM (end_run). Returns the offer agent's conversation (empty if the
     customer never wrote)."""
     sent = store.get(application_id).offers_sent[-1]
     decisions = list(officer.decisions) if officer else []
@@ -297,13 +302,18 @@ async def _simulate_offer_phase(
             sent_to_customer = store.get(application_id).messages
             last = max(last, now, sent_to_customer[-1].sent_at if sent_to_customer else now)
 
-        clock.jump_to(last + timedelta(days=script.signs_after_days))
-        signed_at = clock()
         latest = store.get(application_id).offers_sent[-1]
-        sign_offer(store, application_id, latest.offer_index, signed_at)
+        if script.signs_after_days is not None:
+            clock.jump_to(last + timedelta(days=script.signs_after_days))
+            sign_offer(store, application_id, latest.offer_index, clock())
+        else:
+            # She never signs: the bank's daily check finds the offer expired.
+            clock.jump_to(valid_until(latest))
+            expire_if_due(store, application_id, clock())
+        closing = store.get(application_id).offer_closing
         if messages:  # the offer agent ran, so its paused run is ended
-            closing = offer_prompt.closed_turn("accepted", signed_at.date())
-            messages = await run(end_run(closing))
+            text = offer_prompt.closed_turn(closing.outcome, closing.closed_at.date())
+            messages = await run(end_run(text))
     return messages
 
 
