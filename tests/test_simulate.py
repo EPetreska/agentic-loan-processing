@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 from conftest import AGENT
 from loans.db.postgres_store import PostgresStore
 from loans.evals.case import load_case
+from loans.agents.application.prompt import PROMPT_VERSION as APPLICATION_PROMPT_VERSION
 from loans.agents.offer import prompt as offer_prompt
 from loans.evals.simulate import SimulatedClock, simulate_case
 from loans.rag.search import SearchResult
@@ -448,3 +449,36 @@ def test_through_mcp_the_tools_really_run_on_the_server(mcp_url, pg_conn):
         "SELECT clock FROM case_sessions WHERE application_id = %s", (result.application_id,)
     ).fetchone()
     assert clock == store.get(result.application_id).ending.ended_at + timedelta(minutes=4)
+
+
+# The offer phase through the MCP server: the offer agent's tools are the
+# server's /mcp/offer endpoint, and the case ends exactly as without it.
+
+FULL_FLOWS = [
+    ("05_maria_asks_and_signs", MARIA + OFFER_AGENT, "accepted"),
+    ("06_maria_asks_for_more", MARIA + asks_officer("Borrow $20,000.", "A loan officer will decide.", "Declined."), "accepted"),
+    ("07_maria_asks_for_less", MARIA + asks_officer("Borrow $12,000.", "A loan officer will decide.", "Approved."), "accepted"),
+    ("08_maria_asks_then_goes_silent", MARIA + OFFER_AGENT, "expired"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("case_name, answers, outcome", FULL_FLOWS, ids=[c for c, _, _ in FULL_FLOWS])
+def test_through_mcp_a_full_flow_ends_exactly_as_without(mcp_url, pg_conn, case_name, answers, outcome):
+    # The test server's search finds the same section as the direct one here.
+    store, result = through_mcp(mcp_url, pg_conn, case_name, answers)
+    direct = ApplicationStore(agent=AGENT)
+    run_simulation(load_case(CASES / case_name), direct, FakeModel(messages=iter(answers)), search=lambda q: [SECTION])
+    stored = store.get(result.application_id)
+    assert stored == direct.get(result.application_id)
+    assert stored.offer_closing.outcome == outcome
+    assert result.offer_messages[-1].content.startswith("Today is")  # the run was ended with the closing
+    assert open_sessions(pg_conn) == 0
+
+
+def test_through_mcp_each_agent_had_its_own_session(mcp_url, pg_conn):
+    through_mcp(mcp_url, pg_conn, "05_maria_asks_and_signs", MARIA + OFFER_AGENT)
+    rows = pg_conn.execute(
+        "SELECT agent_name, prompt_version FROM case_sessions WHERE application_id = %s ORDER BY opened_at",
+        ("05_maria_asks_and_signs",),
+    ).fetchall()
+    assert rows == [("application", APPLICATION_PROMPT_VERSION), ("offer", offer_prompt.PROMPT_VERSION)]

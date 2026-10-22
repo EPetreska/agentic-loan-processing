@@ -14,7 +14,8 @@ from loans.evals.simulate import SimulatedClock
 from loans.offers import offer_for
 from loans.schemas.application import RawFile
 from loans.store import ApplicationStore, CaseEnding
-from loans.workflow import after_application, open_case_for_agent, receive_reply
+from loans.audit import AgentVersion
+from loans.workflow import PROMPT_VERSIONS, after_application, open_case_for_agent, receive_reply
 
 CASES = Path(__file__).parent.parent / "evals" / "cases"
 
@@ -97,22 +98,38 @@ def test_directly_the_offer_agent_gets_its_three_tools_and_the_given_search():
     asyncio.run(check())
 
 
-@pytest.mark.parametrize(
-    "mcp_url, search, error",
-    [(None, None, ValueError), ("http://127.0.0.1:8000/mcp", lambda query: [], NotImplementedError)],
-    ids=["no search", "through MCP"],
-)
-def test_the_offer_agent_is_refused_without_a_search_or_through_mcp(mcp_url, search, error):
+def test_directly_the_offer_agent_needs_a_search():
     store = ApplicationStore()
     case = load_case(CASES / "02_maria_job_change")
     app_id = submit_case(store, case)
 
     async def check():
-        async with open_case_for_agent(store, app_id, case.info.start_time, mcp_url, SimulatedClock(case.info.start_time), "offer", search):
+        async with open_case_for_agent(store, app_id, case.info.start_time, None, SimulatedClock(case.info.start_time), "offer"):
             pass
 
-    with pytest.raises(error):
+    with pytest.raises(ValueError, match="document search"):
         asyncio.run(check())
+
+
+@pytest.mark.parametrize("agent", ["application", "offer"])
+def test_directly_each_agents_events_carry_its_own_prompt_version(agent):
+    store = ApplicationStore(agent=AgentVersion(model="m", prompt_version=PROMPT_VERSIONS["application"]))
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    store.record_offer(app_id, offer_for(case.application), case.info.start_time)
+    clock = SimulatedClock(case.info.start_time)
+    first_tool = {"application": ("check_application", {}), "offer": ("retrieve_documents", {"query": "late fee"})}
+
+    async def check():
+        async with open_case_for_agent(store, app_id, case.info.start_time, None, clock, agent, lambda q: []) as (tools, _):
+            name, args = first_tool[agent]
+            tool = next(t for t in tools if t.name == name)
+            tool.invoke({"type": "tool_call", "name": name, "args": args, "id": "c1"})
+
+    asyncio.run(check())
+    event = store.get(app_id).audit_log[-1]
+    assert (event.model, event.prompt_version) == ("m", PROMPT_VERSIONS[agent])
+    assert store.agent.prompt_version == PROMPT_VERSIONS["application"]  # put back afterwards
 
 
 def open_sessions(conn) -> int:
@@ -164,3 +181,24 @@ def test_a_reply_is_recorded_with_its_uploads_and_corrections_together():
     assert stored.document_versions["pay_stub"] == 2 and stored.raw.phone == "(312) 555-0100"
     assert [e.event for e in stored.audit_log][-3:] == ["customer_replied", "document_uploaded", "form_corrected"]
     assert {e.at for e in stored.audit_log[-3:]} == {now}
+
+
+def test_through_mcp_the_offer_agent_gets_its_tools_and_its_own_session(mcp_url, pg_conn):
+    store = PostgresStore(pg_conn, agent=AGENT)
+    case = load_case(CASES / "02_maria_job_change")
+    app_id = submit_case(store, case)
+    store.record_offer(app_id, offer_for(case.application), case.info.start_time)
+
+    async def check():
+        async with open_case_for_agent(store, app_id, case.info.start_time, mcp_url, SimulatedClock(case.info.start_time), "offer") as (tools, _):
+            assert {t.name for t in tools} == {"retrieve_documents", "request_approval", "send_message"}
+            assert pg_conn.execute(
+                "SELECT agent_name, prompt_version FROM case_sessions WHERE closed_at IS NULL"
+            ).fetchone() == ("offer", PROMPT_VERSIONS["offer"])
+            tool = next(t for t in tools if t.name == "retrieve_documents")
+            await tool.ainvoke({"type": "tool_call", "name": "retrieve_documents", "args": {"query": "late fee"}, "id": "c1"})
+        assert open_sessions(pg_conn) == 0
+
+    asyncio.run(check())
+    event = store.get(app_id).audit_log[-1]
+    assert (event.event, event.prompt_version) == ("documents_retrieved", PROMPT_VERSIONS["offer"])

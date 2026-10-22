@@ -271,6 +271,16 @@ class ApplicationStore:
         """The model and prompt version added to agent and guardrail events."""
         return self._agent
 
+    @contextmanager
+    def recording_agent(self, agent: AgentVersion | None) -> Generator[None]:
+        """While open, agent and guardrail events carry this agent's version
+        (each agent has its own prompt, so its own prompt version)."""
+        previous, self._agent = self._agent, agent
+        try:
+            yield
+        finally:
+            self._agent = previous
+
     def submit(
         self,
         raw: RawApplication,

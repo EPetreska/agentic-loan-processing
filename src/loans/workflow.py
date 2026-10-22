@@ -35,8 +35,7 @@ The agents and the bank's steps:
   Directly (no server) the tools run in this program on the store. Each
   agent gets its own tools: the application agent its six, the offer agent
   its three, whose document search (the RAG search) is passed in by the
-  caller. The offer agent works only directly for now; its tools are not
-  yet on the MCP server.
+  caller directly; through MCP the server runs it.
 - after_application: once the application agent has completed a case, the
   credit check (loans.services.credit_bureau) and, if it passes, the offer
   (loans.offers), which is sent at once. Cancelled cases and cases sent to a
@@ -73,11 +72,14 @@ from typing import Literal
 
 from langchain_core.tools import BaseTool
 
+from loans.agents.application.prompt import PROMPT_VERSION as APPLICATION_PROMPT_VERSION
 from loans.agents.application.tools import make_application_tools
+from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.agents.offer.tools import make_offer_tools
+from loans.audit import AgentVersion
 from loans import policy
 from loans.mcp.client import load_tools
-from loans.mcp.sessions import SessionClock, close_session, open_session
+from loans.mcp.sessions import AgentName, SessionClock, close_session, open_session
 from loans.offers import create_offer, offer_for, offer_notice
 from loans.rag.search import SearchResult
 from loans.schemas.application import (
@@ -99,6 +101,12 @@ from loans.store import (
 )
 
 Clock = Callable[[], datetime]
+
+# Each agent's prompt version, for its events in the audit log.
+PROMPT_VERSIONS: dict[AgentName, str] = {
+    "application": APPLICATION_PROMPT_VERSION,
+    "offer": OFFER_PROMPT_VERSION,
+}
 Search = Callable[[str], list[SearchResult]]
 
 
@@ -146,31 +154,44 @@ async def open_case_for_agent(
     start: datetime,
     mcp_url: str | None,
     direct_clock: Clock,
-    agent: Literal["application", "offer"],
+    agent: AgentName,
     search: Search | None = None,
 ) -> AsyncGenerator[tuple[list[BaseTool], Clock]]:
     """Access to one case for an agent, while the context is open: the tools
     that agent may use on that case, and the case's clock. Through the MCP
     server if mcp_url is given (the clock is then the session's, shared with
     the server; mcp_url is the server's address, and the agent's endpoint is
-    under it), else directly with direct_clock. The offer agent needs the
-    document search (search), and works only directly for now."""
-    if agent == "offer":
-        if search is None:
-            raise ValueError("the offer agent needs the document search")
-        if mcp_url is not None:
-            raise NotImplementedError("the offer agent's tools are not on the MCP server yet")
-        yield make_offer_tools(store, application_id, direct_clock, search), direct_clock
-        return
+    under it), else directly with direct_clock. Directly, the offer agent
+    needs the document search (search); through MCP the server runs it.
+
+    While the case is open, the agent's events carry its own prompt version
+    (with the store's model): in the session through MCP, on the store
+    directly."""
+    version = _version_for(store.agent, agent)
     if mcp_url is None:
-        yield make_application_tools(store, application_id, direct_clock), direct_clock
+        if agent == "offer":
+            if search is None:
+                raise ValueError("the offer agent needs the document search")
+            tools = make_offer_tools(store, application_id, direct_clock, search)
+        else:
+            tools = make_application_tools(store, application_id, direct_clock)
+        with store.recording_agent(version):
+            yield tools, direct_clock
         return
     conn = store.connection  # a PostgresStore: the server works on the same database
-    token = open_session(conn, application_id, agent, start, store.agent)
+    token = open_session(conn, application_id, agent, start, version)
     try:
-        yield await load_tools(f"{mcp_url}/{agent}", token, agent), SessionClock(conn, token)
+        with store.recording_agent(version):
+            yield await load_tools(f"{mcp_url}/{agent}", token, agent), SessionClock(conn, token)
     finally:
         close_session(conn, token)
+
+
+def _version_for(base: AgentVersion | None, agent: AgentName) -> AgentVersion | None:
+    """The store's model with this agent's prompt version."""
+    if base is None:
+        return None
+    return AgentVersion(model=base.model, prompt_version=PROMPT_VERSIONS[agent])
 
 
 def after_application(store: ApplicationStore, application_id: str, clock: Clock) -> None:

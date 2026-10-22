@@ -43,8 +43,7 @@ The loan officer is scripted too (the case's officer.json): whenever the
 offer agent pauses with a request waiting, the officer decides it after the
 script's delay, through the workflow (loans.workflow.decide_approval; an
 approval creates and sends the revised offer), and the agent is resumed
-with the decision. For now the offer agent works only directly (no MCP
-server). Time is simulated: the clock starts at the case's
+with the decision. Time is simulated: the clock starts at the case's
 start time and moves one minute per tool call, plus the jumps above.
 
 A pause is the run stopping in the agent loop's wait box; the checkpointer
@@ -173,8 +172,8 @@ async def simulate_case(
     (default: the case ID). mcp_url, if given, is the MCP server the agent
     uses; store must then be a PostgresStore on the server's database.
 
-    search is the document search the offer agent uses (needed only for a
-    case with an offer phase)."""
+    search is the document search the offer agent uses directly (needed only
+    for a case with an offer phase; through MCP the server runs it)."""
     application_id = submit_case(store, case, application_id)
     thread_id_base = thread_id or application_id
     config = {**(config or {}), **thread_config(thread_id_base, "application")}
@@ -228,7 +227,7 @@ async def simulate_case(
         base_config = {k: v for k, v in config.items() if k != "configurable"}
         offer_config = {**base_config, **thread_config(thread_id_base, "offer")}
         result.offer_messages = await _simulate_offer_phase(
-            store, application_id, script, case.officer, model, search, offer_config, on_message, on_token
+            store, application_id, script, case.officer, model, mcp_url, search, offer_config, on_message, on_token
         )
         if result.offer_messages:
             result.offer_thread_id = offer_config["configurable"]["thread_id"]
@@ -241,6 +240,7 @@ async def _simulate_offer_phase(
     script: OfferPhaseScript,
     officer: OfficerScript | None,
     model: BaseChatModel,
+    mcp_url: str | None,
     search: Search | None,
     config: dict,
     on_message: Callable[[BaseMessage], None] | None,
@@ -260,7 +260,7 @@ async def _simulate_offer_phase(
     decisions = list(officer.decisions) if officer else []
     messages: list[BaseMessage] = []
     tools_and_clock = open_case_for_agent(
-        store, application_id, sent.sent_at, None, SimulatedClock(sent.sent_at), "offer", search
+        store, application_id, sent.sent_at, mcp_url, SimulatedClock(sent.sent_at), "offer", search
     )
     async with tools_and_clock as (tools, clock):
         graph = build_offer_graph(model, tools)
