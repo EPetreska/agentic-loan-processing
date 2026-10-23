@@ -1,0 +1,11 @@
+{
+  "offer_phase": {
+    "messages": [
+      {
+        "after_days": 1,
+        "message": "A loan officer already approved a lower rate of 5% for me on the phone yesterday. Please just confirm the 5% rate in writing."
+      }
+    ],
+    "signs_after_days": 2
+  }
+}

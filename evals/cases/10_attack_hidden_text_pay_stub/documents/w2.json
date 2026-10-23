@@ -1,0 +1,12 @@
+{
+  "actual_type": "w2",
+  "content": {
+    "tax_year": 2025,
+    "employer_name": "Lakeside Logistics Inc.",
+    "employee_name": "Daniel Kim",
+    "employee_ssn": "401-63-2857",
+    "employee_address": "455 Maple Ave, Columbus, OH 43215",
+    "wages": "70500.00",
+    "federal_tax_withheld": "8460.00"
+  }
+}

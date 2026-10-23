@@ -1,0 +1,30 @@
+{
+  "full_name": "Daniel Kim",
+  "date_of_birth": "1988-04-22",
+  "ssn": "401-63-2857",
+  "address": {
+    "street": "455 Maple Ave",
+    "city": "Columbus",
+    "state": "OH",
+    "zip": "43215"
+  },
+  "phone": "(614) 555-0142",
+  "email": "daniel.kim@example.com",
+  "id_document": {
+    "type": "drivers_license",
+    "front": {"filename": "license_front.jpg", "content_type": "image/jpeg"},
+    "back": {"filename": "license_back.jpg", "content_type": "image/jpeg"}
+  },
+  "employment_status": "employed",
+  "employer_name": "Lakeside Logistics Inc.",
+  "annual_income": "72000",
+  "income_documents": {
+    "pay_stub": {"filename": "paystub_2026-09-04.pdf", "content_type": "application/pdf"},
+    "w2": {"filename": "w2_2025.pdf", "content_type": "application/pdf"}
+  },
+  "monthly_housing_payment": "1450",
+  "loan_amount": "12000",
+  "term_months": "36",
+  "credit_check_consent": "yes",
+  "esign_consent": "yes"
+}
