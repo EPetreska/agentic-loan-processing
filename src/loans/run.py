@@ -66,6 +66,7 @@ import asyncio
 import json
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -78,8 +79,8 @@ from loans.agents.application.prompt import PROMPT_VERSION
 from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.audit import AgentVersion, format_audit_log, write_audit_log
 from loans.db.postgres_store import PostgresStore, connect, create_tables, database_conninfo
-from loans.evals.case import load_case
-from loans.evals.checks import format_checks, run_checks, transcript_entries
+from loans.evals.case import EvalCase, load_case
+from loans.evals.checks import CheckResult, format_checks, run_checks, transcript_entries
 from loans.evals.simulate import SimulationResult, simulate_case
 from loans.workflow import Search
 from loans.keyring import API_KEYS, keyring_lookup
@@ -286,6 +287,84 @@ def print_offer_phase(stored: StoredApplication) -> None:
         print(f"offer phase closed: {stored.offer_closing.outcome} on {stored.offer_closing.closed_at.date()}")
 
 
+@dataclass
+class CaseRun:
+    """One finished run of one case, with its files saved."""
+
+    case: EvalCase
+    application_id: str
+    case_dir: Path
+    result: SimulationResult
+    stored: StoredApplication
+    checks: list[CheckResult]
+
+
+def run_case(
+    case: EvalCase,
+    store: ApplicationStore,
+    model,
+    model_spec: str,
+    application_id: str,
+    case_dir: Path,
+    mcp_url: str | None,
+    show: bool = False,
+) -> CaseRun:
+    """Run one case (both agents, as its script says), save its files
+    (audit.jsonl, conversation.json, transcript.json) and apply the checks.
+    Used by run.py for one case and by the eval runner for many. Directly
+    (no mcp_url), a case with an offer phase gets the document search here;
+    through MCP the server runs it."""
+    printer = LivePrinter()
+    direct = mcp_url is None
+    search_conn, search = None, None
+    if direct and case.customer.offer_phase is not None:
+        search_conn, search = open_document_search()
+    try:
+        result = asyncio.run(
+            simulate_case(
+                case,
+                store,
+                model,
+                config={
+                    "recursion_limit": MAX_STEPS,
+                    "run_name": f"case {case.case_id}",
+                    "tags": [case.case_id],
+                    "metadata": {
+                        "model": model_spec,
+                        "prompt_version": PROMPT_VERSION,
+                        "offer_prompt_version": OFFER_PROMPT_VERSION,
+                    },
+                },
+                **({"on_message": printer.message, "on_token": printer.token} if show else {}),
+                application_id=application_id,
+                mcp_url=mcp_url,
+                search=search,
+            )
+        )
+    finally:
+        if search_conn is not None:
+            search_conn.close()
+        # Also if the run fails halfway, what happened so far is kept.
+        if store.has(application_id):
+            stored = store.get(application_id)
+            write_conversation(case_dir / "conversation.json", stored)
+            if not direct:  # directly, written as it happened
+                write_audit_log(case_dir / "audit.jsonl", stored.audit_log)
+
+    stored = store.get(result.application_id)
+    transcript = write_transcript(case_dir / "transcript.json", result)
+    checks = run_checks(transcript, stored.audit_log, case)
+    return CaseRun(case, application_id, case_dir, result, stored, checks)
+
+
+def open_store(direct: bool, run_dir: Path, agent: AgentVersion) -> tuple[ApplicationStore, str | None]:
+    """The store a run works on, and the MCP server's address (None
+    directly): in memory directly, else the bank's database."""
+    if direct:
+        return ApplicationStore(run_dir=run_dir, agent=agent), None
+    return open_bank_store(agent), os.environ.get("MCP_URL", DEFAULT_MCP_URL)
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description="Run one eval case with the agent.")
@@ -312,12 +391,7 @@ def main(argv: list[str] | None = None) -> None:
     case = load_case(CASES / args.case)
     run_dir = RUNS / datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
     agent = AgentVersion(model=model_spec, prompt_version=PROMPT_VERSION)
-    if args.direct:
-        store: ApplicationStore = ApplicationStore(run_dir=run_dir, agent=agent)
-        mcp_url = None
-    else:
-        store = open_bank_store(agent)
-        mcp_url = os.environ.get("MCP_URL", DEFAULT_MCP_URL)
+    store, mcp_url = open_store(args.direct, run_dir, agent)
     # Cases stay in the database, so each run's case has its own ID. It also
     # names the checkpointer thread, which LangGraph passes to LangSmith: one
     # thread per run. (LangSmith's thread view cannot show the part after a
@@ -325,45 +399,9 @@ def main(argv: list[str] | None = None) -> None:
     # Runs tab.)
     application_id = f"{case.case_id}@{run_dir.name}"
     case_dir = run_dir / application_id
-    printer = LivePrinter()
-    # Directly, the offer agent's search runs here; through MCP, on the server.
-    search_conn, search = None, None
-    if args.direct and case.customer.offer_phase is not None:
-        search_conn, search = open_document_search()
-    try:
-        result = asyncio.run(
-            simulate_case(
-                case,
-                store,
-                model,
-                config={
-                    "recursion_limit": MAX_STEPS,
-                    "run_name": f"case {case.case_id}",
-                    "tags": [case.case_id],
-                    "metadata": {
-                        "model": model_spec,
-                        "prompt_version": PROMPT_VERSION,
-                        "offer_prompt_version": OFFER_PROMPT_VERSION,
-                    },
-                },
-                **({"on_message": printer.message, "on_token": printer.token} if args.show else {}),
-                application_id=application_id,
-                mcp_url=mcp_url,
-                search=search,
-            )
-        )
-    finally:
-        if search_conn is not None:
-            search_conn.close()
-        # Also if the run fails halfway, what happened so far is kept.
-        if store.has(application_id):
-            stored = store.get(application_id)
-            write_conversation(case_dir / "conversation.json", stored)
-            if not args.direct:  # with --direct, written as it happened
-                write_audit_log(case_dir / "audit.jsonl", stored.audit_log)
+    run = run_case(case, store, model, model_spec, application_id, case_dir, mcp_url, args.show)
 
-    stored = store.get(result.application_id)
-    transcript = write_transcript(case_dir / "transcript.json", result)
+    result, stored = run.result, run.stored
     through = "direct" if args.direct else f"MCP server at {mcp_url}"
     offer_prompt = f"  offer prompt: {OFFER_PROMPT_VERSION}" if result.offer_messages else ""
     print(f"case: {case.case_id}  model: {model_spec}  prompt: {PROMPT_VERSION}{offer_prompt}")
@@ -391,7 +429,7 @@ def main(argv: list[str] | None = None) -> None:
     print()
     print(format_audit_log(stored.audit_log))
     print()
-    print(format_checks(run_checks(transcript, stored.audit_log, case)))
+    print(format_checks(run.checks))
     print()
     print(f"files: {case_dir}/ (audit.jsonl, conversation.json, transcript.json)")
 
