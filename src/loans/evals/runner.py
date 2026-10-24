@@ -25,14 +25,15 @@ run means something forbidden got through or the case ended wrongly
 
 The report (each case's passes out of its runs, the problems of each failed
 run, and the model and prompt versions) is printed and saved as
-runs/<run time>/report.json. Each run's own files are in
-runs/<run time>/<case>@<run time>-run<n>/.
+runs/runner/<run time>/report.json, apart from single runs of run.py.
+Each run's own files are in runs/runner/<run time>/<case>@<run time>-run<n>/.
 """
 
 import argparse
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -45,8 +46,11 @@ from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.audit import AgentVersion
 from loans.evals.case import CaseKind, EvalCase, load_case
 from loans.evals.checks import CheckResult
-from loans.run import CASES, ROOT, RUNS, load_keys, open_store, run_case
+from loans.run import CASES, ROOT, load_keys, open_store, run_case
 from loans.store import StoredApplication
+
+# The runner's own folder under runs/, one folder per start of the runner.
+RUNS = ROOT / "runs" / "runner"
 
 # How a slot is named in a message to the customer.
 SLOT_WORDS = {"pay_stub": ("pay stub",), "w2": ("w-2", "w2"), "tax_return": ("tax return",)}
@@ -180,10 +184,20 @@ def save_report(report: Report, run_dir: Path) -> Path:
 
 
 def run_all(
-    case_names: list[str], times: int, model, model_spec: str, direct: bool, show: bool = False
+    case_names: list[str],
+    times: int,
+    new_model: Callable[[], object],
+    model_spec: str,
+    direct: bool,
+    show: bool = False,
 ) -> tuple[Report, Path]:
     """Run each case the given number of times, one after another, judging
-    each run; print one line per run as it finishes."""
+    each run; print one line per run as it finishes.
+
+    Each run gets a fresh model from new_model: every run has its own event
+    loop (run_case uses asyncio.run), and a model's connection to Ollama
+    stays tied to the loop of its first run, so a reused model fails in the
+    next run with "Event loop is closed"."""
     started = datetime.now(UTC)
     run_dir = RUNS / started.strftime("%Y-%m-%dT%H-%M-%S")
     store, mcp_url = open_store(direct, run_dir, AgentVersion(model=model_spec, prompt_version=PROMPT_VERSION))
@@ -194,6 +208,7 @@ def run_all(
             application_id = f"{case.case_id}@{run_dir.name}-run{n}"
             began = time.monotonic()
             try:
+                model = new_model()
                 run = run_case(case, store, model, model_spec, application_id, run_dir / application_id, mcp_url, show)
                 problems = judge(case, run.stored, run.checks)
                 blocked = blocked_actions(run.stored)
@@ -239,10 +254,10 @@ def main(argv: list[str] | None = None) -> None:
     if not model_spec:
         sys.exit("no model: use --model or set LLM_MODEL (see .env.example)")
     load_keys(model_spec)
-    model = make_model(model_spec)
+    make_model(model_spec)  # first, so a wrong setting fails before any run
 
     print(f"running {len(case_names)} case(s), {args.times} time(s) each: {', '.join(case_names)}\n", flush=True)
-    report, run_dir = run_all(case_names, args.times, model, model_spec, args.direct, args.show)
+    report, run_dir = run_all(case_names, args.times, lambda: make_model(model_spec), model_spec, args.direct, args.show)
     print()
     print(format_report(report))
     print(f"\nsaved: {save_report(report, run_dir)}")

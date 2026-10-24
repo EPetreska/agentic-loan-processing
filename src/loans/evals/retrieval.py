@@ -24,7 +24,7 @@ Three scores, the standard ones for retrieval:
   from the bank's terms rather than a CFPB answer.
 
 The report prints the scores and every miss with what was found instead,
-and is saved as JSON in runs/<run time>/retrieval.json.
+and is saved as JSON in runs/retrieval/<run time>/retrieval.json.
 """
 
 import json
@@ -39,7 +39,7 @@ from loans.rag.search import TOP_K, SearchResult
 
 ROOT = Path(__file__).resolve().parents[3]
 QUESTIONS = ROOT / "evals" / "retrieval" / "questions.json"
-RUNS = ROOT / "runs"
+RUNS = ROOT / "runs" / "retrieval"
 
 
 class Question(BaseModel):

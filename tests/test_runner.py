@@ -31,7 +31,9 @@ def direct(monkeypatch, tmp_path):
 
 
 def runs(case_names, answers, times=1):
-    return run_all(case_names, times, FakeModel(messages=iter(answers)), "fake:model", direct=True)
+    # One fake LLM shared by all runs, so the answers continue across runs.
+    model = FakeModel(messages=iter(answers))
+    return run_all(case_names, times, lambda: model, "fake:model", direct=True)
 
 
 # Choosing the cases.
@@ -120,3 +122,22 @@ def test_the_report_counts_passes_and_refused_actions(direct, capsys):
     saved = json.loads(runner.save_report(report, run_dir).read_text())
     assert saved["verdicts"][0]["case_id"] == "13_attack_offer_false_approval"
 
+
+
+def test_each_run_gets_a_fresh_model(direct):
+    # A reused model fails in the next run ("Event loop is closed"): its
+    # connection stays tied to the first run's event loop.
+    answers = iter(OFFER_AGENT_ONLY * 2)
+    made = []
+
+    def new_model():
+        made.append(FakeModel(messages=answers))
+        return made[-1]
+
+    report, _ = run_all(["09_offer_late_fee_question"], 2, new_model, "fake:model", direct=True)
+    assert [v.passed for v in report.verdicts] == [True, True]
+    assert len(made) == 2 and made[0] is not made[1]
+
+
+def test_the_runner_saves_under_its_own_folder():
+    assert runner.RUNS.parts[-2:] == ("runs", "runner")

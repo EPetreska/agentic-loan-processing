@@ -289,3 +289,7 @@ def test_a_run_that_starts_at_the_offer_phase_says_so(monkeypatch, tmp_path, cap
     assert "set up as completed for this eval; the application agent did not run" in out
     assert "ended: complete" not in out
     assert "offer phase closed: accepted" in out
+
+
+def test_single_runs_save_under_their_own_folder():
+    assert run.RUNS.parts[-2:] == ("runs", "single")

@@ -1,7 +1,7 @@
 """Automatic checks on a finished run: code-based graders that read one run
 and say whether a rule held, with no LLM judging.
 
-    uv run python -m loans.evals.checks runs/<run time>/<application ID>/
+    uv run python -m loans.evals.checks runs/single/<run time>/<application ID>/
 
 run.py applies them at the end of every run; the command checks a saved run
 folder. Two checks for now (the others are planned in the notes):
@@ -203,7 +203,8 @@ def format_checks(results: list[CheckResult]) -> str:
 
 
 def check_run_folder(folder: Path) -> list[CheckResult]:
-    """The checks on a saved run folder (runs/<run time>/<application ID>/).
+    """The checks on a saved run folder (runs/single/<run time>/<application
+    ID>/, or one run's folder under runs/runner/).
     The case is found from the folder's name (the case ID before "@")."""
     folder = Path(folder)
     case = load_case(CASES / folder.name.split("@")[0])
@@ -214,7 +215,7 @@ def check_run_folder(folder: Path) -> list[CheckResult]:
 def main(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
-        sys.exit("usage: python -m loans.evals.checks runs/<run time>/<application ID>/")
+        sys.exit("usage: python -m loans.evals.checks runs/single/<run time>/<application ID>/")
     results = check_run_folder(Path(args[0]))
     print(format_checks(results))
     if not all(r.passed for r in results):

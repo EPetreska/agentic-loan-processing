@@ -12,7 +12,7 @@ no SSN, date of birth or contact details, and no values the customer typed.
 
 To read a saved log file as a table:
 
-    uv run python -m loans.audit runs/<run time>/<case>/audit.jsonl
+    uv run python -m loans.audit runs/single/<run time>/<case>/audit.jsonl
 """
 
 import sys

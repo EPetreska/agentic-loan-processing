@@ -32,7 +32,7 @@ gets its own application ID, the case ID with the run time:
 02_maria_job_change@2026-10-21T15-00-00. Each run gets a folder, with one
 folder per case inside:
 
-    runs/<run time>/<application ID>/
+    runs/single/<run time>/<application ID>/
         audit.jsonl          the audit log
         conversation.json    the messages between the agents and the customer
         transcript.json      everything the LLM saw and wrote, for each agent
@@ -90,7 +90,9 @@ from loans.store import ApplicationStore, StoredApplication
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "evals" / "cases"
-RUNS = ROOT / "runs"
+# Single runs of run.py, apart from the eval runner (runs/runner/) and the
+# retrieval eval (runs/retrieval/).
+RUNS = ROOT / "runs" / "single"
 
 # Where the MCP server listens unless MCP_URL says otherwise (see .env.example).
 DEFAULT_MCP_URL = "http://127.0.0.1:8000/mcp"

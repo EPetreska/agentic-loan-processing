@@ -80,3 +80,9 @@ def test_the_report_is_saved(tmp_path):
     path = save_report(report, tmp_path)
     assert path.name == "retrieval.json"
     assert json.loads(path.read_text())["hit_rate"] == 0.75
+
+
+def test_the_retrieval_eval_saves_under_its_own_folder():
+    from loans.evals import retrieval
+
+    assert retrieval.RUNS.parts[-2:] == ("runs", "retrieval")
