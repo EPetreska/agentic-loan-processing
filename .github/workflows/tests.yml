@@ -1,0 +1,44 @@
+# Runs the test suite on every push and pull request, with a throwaway
+# Postgres (pgvector) for the database and MCP server tests. The tests that
+# need Ollama's embedding model are skipped here, as on any machine without it.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # The same image as docker-compose.yml. The password is a throwaway
+        # one for this run only: the database lives only while the job runs.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: loans
+          POSTGRES_DB: loans
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U loans -d loans"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://loans@localhost:5432/loans
+      PGPASSWORD: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install Python and the locked packages
+        run: uv sync --frozen
+
+      - name: Run the tests
+        run: uv run --frozen pytest -q -rs
