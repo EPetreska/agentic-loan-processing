@@ -45,7 +45,10 @@ The details of the architecture: the components, how they talk to each other, wh
 - The application agent stops when `finish` itself answers that the case ended. Only that tool's answer counts, not the LLM's text or another tool's result, so injected text cannot end a run.
 - The offer agent never stops by itself. The workflow ends its run (`end_run`, no LLM call) once the offer phase closes.
 
-**Bounded runs.** At most 60 agent steps per run (`MAX_STEPS`), at most 10 pauses (`MAX_PAUSES`), and a 30-second timeout per MCP call.
+**Bounded runs.**
+- Between two pauses, an agent can make about 30 LLM calls at most: LangGraph's recursion limit is 60 (`MAX_STEPS` in `run.py`), it counts both agent and tool steps, and it starts over each time the run is resumed.
+- In the evals, the simulation gives up on the application agent after 10 pauses (`MAX_PAUSES` in `evals/simulate.py`). The offer agent has no pause limit: its run ends when the customer's script runs out.
+- Each MCP call has a 30-second timeout.
 
 ## The MCP server
 
@@ -74,9 +77,9 @@ The details of the architecture: the components, how they talk to each other, wh
 
 ## Prompts and policy
 
-- **One source for the numbers.** Every rule value the agents are told (pay stub age, income tolerance, deadlines, rates, fees) lives in `src/loans/policy.py`. Each agent's prompt (`agents/*/prompt.py`) fills them in, and the checks in code use the same values, so the prompt and the enforcement cannot drift apart. Tool descriptions are also generated from code.
+- **One source for the numbers.** Every rule value in the agents' prompts (pay stub age, income tolerance, deadlines, rates, fees) lives in `src/loans/policy.py`. Each agent's prompt (`agents/*/prompt.py`) fills them in, and the checks in code use the same values, so the prompt and the enforcement cannot drift apart. The tool descriptions are written once in code (`tools/*/descriptions.py`) and shared by the direct tools and the MCP server, so the two cannot drift apart either.
 - **The prompt gives the goal and the rules, not the path.** No fixed order of steps: the tools refuse anything the rules do not allow, so the agent can choose its own path safely.
-- **Versioned prompts.** Each prompt has a version (a hash of its text), recorded with every event in the audit log and in the eval report, so a change in behavior can be tied to a prompt change.
+- **Versioned prompts.** Each agent's prompt has a version: a hash of the system prompt and the fixed wording of the messages that start and resume the agent. It is recorded with every agent and guardrail event in the audit log and in the eval report, so a change in behavior can be tied to a prompt change. The tool descriptions are not part of the hash, so changing one does not change the version.
 
 ## RAG pipeline
 
@@ -101,15 +104,23 @@ The details of the architecture: the components, how they talk to each other, wh
 ```
 src/loans/
   agents/          the two agents: shared loop, prompt, tools and graph for each
-  tools/           the tools, one file each, per agent
+  tools/           the tools, one file each, per agent; messages.py shared by both
   mcp/             server, client, sessions
   workflow.py      the bank's deterministic steps
+  intake.py        receiving a new application
+  offers.py        creating and pricing offers, the offer notice
+  income.py        income arithmetic (annualizing pay), done in code
   checks/          field checks, income rules, ending rules
   services/        mock identity vendor, document extraction, credit bureau
+  schemas/         Pydantic models: the application, documents, endings
+  store.py         the store interface and the in-memory store
+  db/              the Postgres store and schema
+  audit.py         audit events and their names
+  spotlight.py     quoting untrusted text before it reaches the LLM
   rag/             documents, chunking, embeddings, index, search
-  db/              Postgres store and schema
   evals/           cases, simulation, checks, runner, retrieval eval
   policy.py        the bank's rule values
+  keyring.py       reading secrets from the system keyring
   run.py           run one case
 evals/             eval cases, attack list, retrieval questions
 documents/         the RAG documents

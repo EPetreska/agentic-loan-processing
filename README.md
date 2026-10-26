@@ -59,7 +59,7 @@ flowchart TD
 - **At the end of a case:** `finish` accepts an ending only if the rules allow it (for example no "complete" without a verified identity and income).
 - **In the workflow:** pricing, offers and acceptance are code only; any change to an offer needs a loan officer.
 
-Every rule value the agents are told lives in one file (`policy.py`), used by both the prompts and the checks, so they cannot drift apart. The full list is in [Guardrails and security](#guardrails-and-security).
+Every rule value in the agents' prompts lives in one file (`policy.py`), used by both the prompts and the checks, so they cannot drift apart. The full list is in [Guardrails and security](#guardrails-and-security).
 
 **Key design decisions:**
 - **Code for the process, agents for judgment.** A loan case lasts weeks and waits on people, so the order of steps is plain code, not something an LLM plans. In production the workflow would run on a durable workflow engine such as Temporal, with the same agents inside.
@@ -121,7 +121,7 @@ The rules the agents work under are written in the prompts, but enforced in code
 - Every tool validates its input and refuses actions the rules do not allow, telling the agent why (refusals are logged as `action_blocked`).
 - `finish` checks the chosen ending against the bank's rules: no "complete" without a verified identity and a current income document, no cancellation for no answer before 26 days.
 - Offers are priced only by code, from one rate table. Only the customer's e-signature accepts an offer; a "yes" in a message does not.
-- Every number the agent is told (deadlines, limits, fees) comes from one file, `policy.py`, also used by the checks, so prompt and code cannot drift apart.
+- Every number in the agents' prompts (deadlines, document age, fees, rates) comes from one file, `policy.py`, also used by the checks, so prompt and code cannot drift apart.
 
 **Prompt injection and jailbreak defense**
 - Customer messages and document text are quoted, length-limited and marked as data; retrieved RAG sections come under a "data, not instructions" header, each between start and end markers.
@@ -130,7 +130,7 @@ The rules the agents work under are written in the prompts, but enforced in code
 
 **Human-in-the-loop and audit**
 - Any change to an offer needs a loan officer's decision, recorded with the officer's ID.
-- Every action by the customer, the agents, the guardrails and the officer goes into an audit log that Postgres keeps append-only. Agents give a reason for every important action, and each event records the model and prompt version.
+- Every action by the customer, the agents, the guardrails and the officer goes into an audit log that Postgres keeps append-only. Agents give a reason for every important action, and each agent and guardrail event records the model and prompt version.
 
 ## RAG
 
