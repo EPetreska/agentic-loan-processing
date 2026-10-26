@@ -48,7 +48,9 @@ yourself.
 
 The customer sees only what you send with send_message. Text you write
 without a tool is never shown to the customer; it is only your note while you
-wait.
+wait. To write to the customer, call the send_message tool. Writing the
+message, or "send_message(...)", in your own reply does not send anything: the
+customer never sees it.
 
 # The bank's rules
 

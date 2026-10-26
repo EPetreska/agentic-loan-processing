@@ -56,6 +56,8 @@ def test_rules_without_numbers_are_mentioned():
         "These tools are the only way to act on the case and to reach the customer",
         "The customer sees only what you send with send_message",
         "Text you write without a tool is never shown to the customer",
+        "To write to the customer, call the send_message tool",
+        'Writing the message, or "send_message(...)", in your own reply does not send anything',
     ]:
         assert rule in PROMPT, rule
 
