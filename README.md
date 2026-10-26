@@ -1,5 +1,7 @@
 # Agentic Loan Processing
 
+[![tests](https://github.com/EPetreska/agentic-loan-processing/actions/workflows/tests.yml/badge.svg)](https://github.com/EPetreska/agentic-loan-processing/actions/workflows/tests.yml)
+
 A multi-agent LLM system in Python that handles US consumer personal loan applications from submission to signed offer. Two LangGraph agents do the work that needs judgment: completing the application, and answering the customer's questions about the offer. Plain code does everything that must be exact: pricing, credit check, deadlines, the audit trail. The agents work within the bank's rules (lending regulations, data protection, the bank's own policies): the rules are stated in their prompts and enforced by guardrails in code, so even a mistaken or manipulated LLM cannot break them or leak customer data. Agents reach the bank's data only through their tools, served by an MCP server with per-case authorization (or run in-process for quick development runs). Every run is measured by an eval suite with code-based graders and prompt-injection attack cases.
 
 It is a realistic, regulation-grounded simulation with synthetic applicants, built with production-grade practices (a real database, an authenticated tool server, guardrails, tracing and evals), but not a production bank system.
@@ -229,3 +231,7 @@ US consumer personal loans only ($1,000 to $50,000, 12 to 60 months), online, in
 **Not modeled:** real underwriting (credit scores, debt-to-income, denials), real vendor integrations, fraud and document-authenticity checks, and anything after the loan is signed.
 
 The regulatory descriptions reflect a general understanding of US rules and are not legal advice.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The CFPB answers in `documents/cfpb/` are US government works in the public domain and are not covered by this license.
