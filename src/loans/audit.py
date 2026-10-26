@@ -3,8 +3,9 @@
 One event per step, with the case ID, the exact time, who acted and a stable
 event name, so a person (an auditor, the human approver) can follow a case
 afterwards, and the log can later be exported as an event log for process
-mining. Events are only ever added, never changed or removed; for now they
-are kept in the store, later in an append-only Postgres table.
+mining. Events are only ever added, never changed or removed: with Postgres
+they are kept in the audit_events table, which Postgres itself keeps
+append-only (db/schema.sql); the in-memory store keeps them with the case.
 
 This is separate from tracing (LangSmith), which records the prompts and LLM
 calls for the developer. The audit log holds no prompts and no sensitive data:

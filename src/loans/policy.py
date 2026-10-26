@@ -7,8 +7,8 @@ evals check them. Each value notes where it comes from.
 from decimal import Decimal
 
 # A customer who does not answer is cancelled only after this many days
-# without an answer, counted from the agent's last follow-up message, never
-# earlier. From BPI Challenge 2017: the bank cancelled applications
+# without an answer, counted from the last contact (the agent's last message
+# or the customer's last reply, whichever is later), never earlier. From BPI Challenge 2017: the bank cancelled applications
 # automatically about 26 days after the last follow-up call.
 NO_ANSWER_CANCEL_DAYS = 26
 

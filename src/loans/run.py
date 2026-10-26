@@ -37,7 +37,7 @@ folder per case inside:
         conversation.json    the messages between the agents and the customer
         transcript.json      everything the LLM saw and wrote, for each agent
 
-Both are written at the end, also if the run fails halfway, from the case as
+All three are written at the end, also if the run fails halfway, from the case as
 kept in Postgres, where every event is recorded the moment it happens (with
 --direct, the audit log is written event by event as it happens). The
 conversation is kept so it can be reviewed and checked by the evals; the
