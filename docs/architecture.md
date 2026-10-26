@@ -74,7 +74,7 @@ The details of the architecture: the components, how they talk to each other, wh
 
 ## Prompts and policy
 
-- **One source for the numbers.** Every rule value (pay stub age, income tolerance, deadlines, rates, fees) lives in `src/loans/policy.py`. Each agent's prompt (`agents/*/prompt.py`) fills them in, and the checks in code use the same values, so the prompt and the enforcement cannot drift apart. Tool descriptions are also generated from code.
+- **One source for the numbers.** Every rule value the agents are told (pay stub age, income tolerance, deadlines, rates, fees) lives in `src/loans/policy.py`. Each agent's prompt (`agents/*/prompt.py`) fills them in, and the checks in code use the same values, so the prompt and the enforcement cannot drift apart. Tool descriptions are also generated from code.
 - **The prompt gives the goal and the rules, not the path.** No fixed order of steps: the tools refuse anything the rules do not allow, so the agent can choose its own path safely.
 - **Versioned prompts.** Each prompt has a version (a hash of its text), recorded with every event in the audit log and in the eval report, so a change in behavior can be tied to a prompt change.
 
@@ -82,7 +82,7 @@ The details of the architecture: the components, how they talk to each other, wh
 
 | Step | Code | Detail |
 |---|---|---|
-| Documents | `rag/bank_terms.py`, `rag/cfpb.py` | Bank terms generated from `policy.py`; 42 CFPB answers downloaded and cleaned with BeautifulSoup |
+| Documents | `rag/bank_terms.py`, `rag/cfpb.py` | Bank terms generated from `policy.py` and the application form's limits; 42 CFPB answers downloaded and cleaned with BeautifulSoup |
 | Chunking | `rag/chunks.py` | Markdown header splitter, then recursive splitting for sections over 1,800 characters (overlap 150); 108 chunks; each chunk keeps its title and source |
 | Embedding | `rag/embeddings.py` | `nomic-embed-text` v1.5 through Ollama, 768 dimensions, with its document and query prefixes |
 | Index | `rag/index.py`, `db/schema.sql` | Table `rag_chunks`, HNSW cosine index; full rebuild in one transaction; each chunk records its embedding model |
@@ -109,7 +109,7 @@ src/loans/
   rag/             documents, chunking, embeddings, index, search
   db/              Postgres store and schema
   evals/           cases, simulation, checks, runner, retrieval eval
-  policy.py        every rule value, in one place
+  policy.py        the bank's rule values
   run.py           run one case
 evals/             eval cases, attack list, retrieval questions
 documents/         the RAG documents

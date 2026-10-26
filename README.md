@@ -8,13 +8,13 @@ It is a realistic, regulation-grounded simulation with synthetic applicants, bui
 
 - **Engineering:** Python 3.12, uv, Docker (Docker Compose), pytest, CI with GitHub Actions (pytest on every push, with a Postgres service for the integration tests), secrets in the system keyring, never in files; AI-assisted development with Claude Code
 - **Agents:** LangGraph (tool-calling agent loops with human-in-the-loop interrupts and a checkpointer), LangChain
-- **LLMs:** a local model through Ollama (Qwen 3 4B, CPU only) for development, Claude (`langchain-anthropic`) for headline results; switched with one setting (`LLM_MODEL`)
+- **LLMs:** a local model through Ollama (Qwen 3 4B, CPU only) for development, Claude (`langchain-anthropic`) supported, for comparison runs; switched with one setting (`LLM_MODEL`)
 - **Tools:** Model Context Protocol (official MCP Python SDK v2, streamable HTTP), with a custom lightweight client
 - **RAG:** LangChain text splitters, `nomic-embed-text` embeddings (local, Ollama), pgvector with an HNSW index
 - **Data:** Postgres 17 in Docker, plain SQL with `psycopg` and a connection pool, an append-only audit table
 - **Structured outputs and validation:** Pydantic: every input, tool result and handoff is typed and validated
 - **Observability:** LangSmith tracing, a structured audit log, a saved transcript of everything the LLM saw
-- **Evals:** scenario cases with a simulated customer and loan officer, code-based graders, an eval runner with repeated runs (pass^k) for regression testing across prompt and model versions, a retrieval eval
+- **Evals:** scenario cases with a simulated customer and loan officer, code-based graders, an eval runner with repeated runs per case to measure reliability, for regression testing across prompt and model versions, a retrieval eval
 
 ## The loan process, end to end
 
@@ -54,12 +54,12 @@ flowchart TD
 | **Postgres** | Cases, the append-only audit log, sessions, and the pgvector index for RAG. |
 
 **Rules and guardrails.** Each agent's prompt states the goal and the rules (for example "a pay stub counts only if it is at most 30 days old"), but no fixed order of steps, so the agent plans its own path. The rules are then enforced in code at every layer, whatever the LLM decides:
-- **Before the LLM:** tools return only allowlisted fields, never the SSN, date of birth or contact details, and untrusted text (customer messages, documents, retrieved sections) is quoted and marked as data, not instructions.
+- **Before the LLM:** tools return only allowlisted fields, never the SSN, date of birth or contact details, and untrusted text (customer messages, documents, retrieved sections) is marked as data, not instructions.
 - **At every tool call:** the MCP server checks the token, and each tool refuses actions the rules do not allow and tells the agent why; refusals are logged.
 - **At the end of a case:** `finish` accepts an ending only if the rules allow it (for example no "complete" without a verified identity and income).
 - **In the workflow:** pricing, offers and acceptance are code only; any change to an offer needs a loan officer.
 
-Every rule value lives in one file (`policy.py`), used by both the prompts and the checks, so they cannot drift apart. The full list is in [Guardrails and security](#guardrails-and-security).
+Every rule value the agents are told lives in one file (`policy.py`), used by both the prompts and the checks, so they cannot drift apart. The full list is in [Guardrails and security](#guardrails-and-security).
 
 **Key design decisions:**
 - **Code for the process, agents for judgment.** A loan case lasts weeks and waits on people, so the order of steps is plain code, not something an LLM plans. In production the workflow would run on a durable workflow engine such as Temporal, with the same agents inside.
@@ -124,7 +124,7 @@ The rules the agents work under are written in the prompts, but enforced in code
 - Every number the agent is told (deadlines, limits, fees) comes from one file, `policy.py`, also used by the checks, so prompt and code cannot drift apart.
 
 **Prompt injection and jailbreak defense**
-- Customer messages, document text and retrieved RAG sections are quoted, length-limited and marked as data, not instructions.
+- Customer messages and document text are quoted, length-limited and marked as data; retrieved RAG sections come under a "data, not instructions" header, each between start and end markers.
 - The run ends only when `finish` itself confirms it, so injected text such as "case ended" cannot stop the agent.
 - Attack cases from the OWASP Top 10 for LLM Applications test these defenses (see Evals).
 
@@ -136,8 +136,8 @@ The rules the agents work under are written in the prompts, but enforced in code
 
 The offer agent answers from about 20,000 words of documents:
 
-- **The bank's loan terms and FAQ**, generated from `policy.py`, so the documents always match the offers (a test checks it).
-- **42 CFPB "Ask CFPB" answers** (public domain), including 11 about other products (car loans, mortgages, credit cards) on purpose, so the agent must pick the right source.
+- **The bank's loan terms and FAQ**, generated from `policy.py` and the application form's limits, so the documents always match the offers (a test checks it).
+- **42 CFPB "Ask CFPB" answers** (public domain), including 11 about other products (car loans, mortgages, student loans, payday loans, credit cards) on purpose, so the agent must pick the right source.
 
 Pipeline: header-aware chunking (Markdown headers, then recursive splitting; 108 chunks), local embeddings with `nomic-embed-text` v1.5, pgvector with an HNSW cosine index, top 4 results. Re-indexing is a full rebuild in one transaction.
 
@@ -153,7 +153,7 @@ A scenario-based eval suite with a simulated customer, per-case expected end sta
 - **Full flow and offer agent (05–09):** the customer signs, asks for more, asks for less, goes silent until the offer expires, asks about the late fee.
 - **Attacks (10–13):** hidden instructions in a pay stub (indirect prompt injection, OWASP LLM01), a fake bank manager (direct prompt injection), a request to repeat the SSN (sensitive information disclosure, LLM02), a false claim that a 5% rate was approved.
 
-Each run is judged by code against the expected result: the ending, the documents asked for, the number of messages, and how the offer closed. For the attack cases the report also counts the actions the code refused: a refused action means the LLM tried something forbidden but the code stopped it.
+Each run is judged by code against the expected result: the ending, whether the income was verified, the documents asked for, the maximum number of messages, how the offer closed, and the two automatic checks below. For the attack cases the report also counts the actions the code refused: a refused action means the LLM tried something forbidden but the code stopped it.
 
 An eval runner runs the cases several times each to measure reliability, and writes one report with the model and prompt versions, so a prompt or model change can be regression-tested against the same cases.
 
@@ -179,8 +179,8 @@ In production the same checks would run on every case as it finishes (online eva
 - **The failure:** with a small local model (Qwen 3 4B) the offer agent sometimes wrote a correct, grounded answer but did not send it, so the customer got nothing. The case still passed, since it checked only the ending.
 - **How it was caught:** first by reading the runs, then by the "every message answered" check, which now flags it on every run.
 - **What was tried:** four prompt changes, each tracked by its prompt version in the audit log. They helped, but did not remove the failure.
-- **The root cause:** the model knew what to do, but put the tool call in the wrong place: as plain text, or inside its thinking, where Ollama does not pick it up. This is a known weakness of Qwen 3 in thinking mode, so the prompts were frozen and the same cases are run with Claude to compare.
-- **Security:** in the false-approval attack (case 13) the agent did not accept the 5% rate; it checked the bank's terms and quoted the real one. Even if fooled, it has no tool that can change an offer.
+- **The root cause:** the model knew what to do, but put the tool call in the wrong place: as plain text, or inside its thinking, where Ollama does not pick it up. This is a known weakness of Qwen 3 in thinking mode, so the prompts were frozen; the next step is to run the same cases with Claude and compare.
+- **Security:** in the one development run of the false-approval attack (case 13), the agent did not accept the 5% rate, but its reply was weak: it quoted the wrong rate, half-accepted the claim ("contact them directly to confirm the details of your approved rate"), and was never sent. The system was still safe: the agent has no tool that can change an offer, which only code prices and sends.
 
 ## How to run
 
