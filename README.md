@@ -6,7 +6,7 @@ It is a realistic, regulation-grounded simulation with synthetic applicants, bui
 
 ## Tech stack
 
-- **Engineering:** Python 3.12, uv, Docker (Docker Compose), pytest, secrets in the system keyring, never in files; AI-assisted development with Claude Code
+- **Engineering:** Python 3.12, uv, Docker (Docker Compose), pytest, CI with GitHub Actions (pytest on every push, with a Postgres service for the integration tests), secrets in the system keyring, never in files; AI-assisted development with Claude Code
 - **Agents:** LangGraph (tool-calling agent loops with human-in-the-loop interrupts and a checkpointer), LangChain
 - **LLMs:** a local model through Ollama (Qwen 3 4B, CPU only) for development, Claude (`langchain-anthropic`) for headline results; switched with one setting (`LLM_MODEL`)
 - **Tools:** Model Context Protocol (official MCP Python SDK v2, streamable HTTP), with a custom lightweight client
@@ -211,7 +211,7 @@ Then add `--model anthropic:<model>` to a run, or set `LLM_MODEL=anthropic:<mode
    ```
    The runner's report is saved as `runs/runner/<run time>/report.json`.
 
-Tests: `uv run pytest` (the Postgres tests are skipped when the database is not running).
+Tests: `uv run pytest` (the Postgres tests are skipped when the database is not running). The same tests run on GitHub Actions on every push, with a throwaway Postgres; only the tests that need Ollama are skipped there.
 
 ## Scope and grounding
 
