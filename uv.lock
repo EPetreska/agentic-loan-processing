@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agentic-bpm-loans"
+name = "agentic-loan-processing"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
