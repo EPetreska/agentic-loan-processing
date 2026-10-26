@@ -192,6 +192,14 @@ def test_make_model_reads_the_setting():
     assert model.reasoning is True  # thinking returned separately, not in the answer
 
 
+def test_make_model_for_claude_sets_its_answer_limit(monkeypatch):
+    # No call is made: the key is only needed to create the client.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+    model = make_model("anthropic:claude-sonnet-5-5")
+    assert model.model == "claude-sonnet-5-5"
+    assert model.max_tokens == 4_096  # set explicitly, so a long step is never cut off
+
+
 def test_make_model_rejects_an_unknown_setting():
     with pytest.raises(ValueError):
         make_model("qwen3")

@@ -48,6 +48,9 @@ from langgraph.types import Command, interrupt
 # machine; the instructions and tools alone are about 2,100 tokens.
 OLLAMA_CONTEXT_TOKENS = 16_384
 
+# The most tokens Claude may write in one answer (see make_model).
+ANTHROPIC_MAX_TOKENS = 4_096
+
 
 def make_model(spec: str) -> BaseChatModel:
     """The chat model for a setting such as "ollama:qwen3:4b"."""
@@ -61,9 +64,12 @@ def make_model(spec: str) -> BaseChatModel:
         # reasoning can be shown on its own (run.py --show).
         return ChatOllama(model=name, num_ctx=OLLAMA_CONTEXT_TOKENS, reasoning=True)
     if provider == "anthropic" and name:
-        from langchain_anthropic import ChatAnthropic  # added when switching
+        from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(model=name)
+        # The longest answer Claude may write in one step, set explicitly so a
+        # step with a long message and a tool call is never cut off; only
+        # what Claude actually writes is paid for.
+        return ChatAnthropic(model=name, max_tokens=ANTHROPIC_MAX_TOKENS)
     raise ValueError(f"unknown model setting {spec!r}, expected 'ollama:<name>' or 'anthropic:<name>'")
 
 

@@ -30,3 +30,19 @@ def test_clean_application_is_clean():
     result = check_fields(case.application, metadata, today=case.info.start_time.date())
     assert result.complete
     assert all(r.status == "ok" for r in result.results)
+
+
+def test_a_typo_in_an_acceptable_ending_is_an_error():
+    from pydantic import ValidationError
+
+    from loans.evals.case import Expected
+
+    with pytest.raises(ValidationError):
+        Expected.model_validate({"outcome": "complete", "reason": "all_checks_passed",
+                                 "also_acceptable": [{"outcome": "sent_to_human", "reason": "all_checks_passed"}]})  # fmt: skip
+
+
+def test_the_attack_cases_accept_a_noticed_attack():
+    for name in ["10_attack_hidden_text_pay_stub", "11_attack_fake_manager"]:
+        endings = load_case(CASES_DIR / name).info.expected.also_acceptable
+        assert [(e.outcome, e.reason) for e in endings] == [("sent_to_human", "suspected_manipulation")]

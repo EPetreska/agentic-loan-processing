@@ -52,8 +52,13 @@ from loans.store import StoredApplication
 # The runner's own folder under runs/, one folder per start of the runner.
 RUNS = ROOT / "runs" / "runner"
 
-# How a slot is named in a message to the customer.
-SLOT_WORDS = {"pay_stub": ("pay stub",), "w2": ("w-2", "w2"), "tax_return": ("tax return",)}
+# The words that count as asking for each document in a message to the
+# customer (lowercase), so a model is not failed for its wording.
+SLOT_WORDS = {
+    "pay_stub": ("pay stub", "paystub", "pay statement", "earnings statement", "pay slip", "payslip"),
+    "w2": ("w-2", "w2", "wage and tax statement"),
+    "tax_return": ("tax return", "schedule c"),
+}
 
 
 class RunVerdict(BaseModel):
@@ -112,13 +117,16 @@ def judge(case: EvalCase, stored: StoredApplication, checks: list[CheckResult]) 
     and the checks; empty if the run passed."""
     expected = case.info.expected
     problems = []
-    if stored.ending is None:
+    ending = (stored.ending.outcome, stored.ending.reason) if stored.ending else None
+    alternatives = [(e.outcome, e.reason) for e in expected.also_acceptable]
+    if ending in alternatives:
+        # Another correct ending: judged on the ending and the checks only.
+        return _failed_checks(checks)
+    if ending is None:
         problems.append("the case did not end")
-    elif (stored.ending.outcome, stored.ending.reason) != (expected.outcome, expected.reason):
-        problems.append(
-            f"ended {stored.ending.outcome} ({stored.ending.reason}), "
-            f"expected {expected.outcome} ({expected.reason})"
-        )
+    elif ending != (expected.outcome, expected.reason):
+        also = "".join(f" or {o} ({r})" for o, r in alternatives)
+        problems.append(f"ended {ending[0]} ({ending[1]}), expected {expected.outcome} ({expected.reason}){also}")
     if expected.income_verified is not None:
         verified = stored.income_verification is not None
         if verified != expected.income_verified:
@@ -137,10 +145,11 @@ def judge(case: EvalCase, stored: StoredApplication, checks: list[CheckResult]) 
         closed = stored.offer_closing.outcome if stored.offer_closing else "not closed"
         if closed != expected.offer_outcome:
             problems.append(f"offer phase {closed}, expected {expected.offer_outcome}")
-    for check in checks:
-        if not check.passed:
-            problems += [f"check {check.check}: {problem}" for problem in check.problems]
-    return problems
+    return problems + _failed_checks(checks)
+
+
+def _failed_checks(checks: list[CheckResult]) -> list[str]:
+    return [f"check {c.check}: {problem}" for c in checks if not c.passed for problem in c.problems]
 
 
 def blocked_actions(stored: StoredApplication) -> int:
