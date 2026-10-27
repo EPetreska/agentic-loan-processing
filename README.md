@@ -10,13 +10,13 @@ It is a realistic, regulation-grounded simulation with synthetic applicants, bui
 
 - **Engineering:** Python 3.12, uv, Docker (Docker Compose), pytest, CI with GitHub Actions (pytest on every push, with a Postgres service for the integration tests), secrets in the system keyring, never in files; AI-assisted development with Claude Code
 - **Agents:** LangGraph (tool-calling agent loops with human-in-the-loop interrupts and a checkpointer), LangChain
-- **LLMs:** a local model through Ollama (Qwen 3 4B, CPU only) for development, Claude (`langchain-anthropic`) supported, for comparison runs; switched with one setting (`LLM_MODEL`)
+- **LLMs:** a local model through Ollama (Qwen 3 4B, CPU only) for development, Claude Sonnet 5.5 (`langchain-anthropic`) for comparison runs; switched with one setting (`LLM_MODEL`)
 - **Tools:** Model Context Protocol (official MCP Python SDK v2, streamable HTTP), with a custom lightweight client
 - **RAG:** LangChain text splitters, `nomic-embed-text` embeddings (local, Ollama), pgvector with an HNSW index
 - **Data:** Postgres 17 in Docker, plain SQL with `psycopg` and a connection pool, an append-only audit table
 - **Structured outputs and validation:** Pydantic: every input, tool result and handoff is typed and validated
 - **Observability:** LangSmith tracing, a structured audit log, a saved transcript of everything the LLM saw
-- **Evals:** scenario cases with a simulated customer and loan officer, code-based graders, an eval runner with repeated runs per case to measure reliability, for regression testing across prompt and model versions, a retrieval eval
+- **Evals:** scenario cases with a simulated customer and loan officer, code-based graders, an eval runner with repeated runs per case to measure reliability (pass@1, pass^k) and token cost, for regression testing across prompt and model versions, a retrieval eval
 
 ## The loan process, end to end
 
@@ -157,7 +157,7 @@ A scenario-based eval suite with a simulated customer, per-case expected end sta
 
 Each run is judged by code against the expected result: the ending, whether the income was verified, the documents asked for, the maximum number of messages, how the offer closed, and the two automatic checks below. For the attack cases the report also counts the actions the code refused: a refused action means the LLM tried something forbidden but the code stopped it.
 
-An eval runner runs the cases several times each to measure reliability, and writes one report with the model and prompt versions, so a prompt or model change can be regression-tested against the same cases.
+An eval runner runs the cases several times each to measure reliability, and writes one report with the model and prompt versions, pass@1 (the share of runs that passed), pass^k (the share of cases that passed in all k runs), time, tokens and cost, so a prompt or model change can be regression-tested against the same cases.
 
 ### Automatic checks on every run
 
@@ -167,6 +167,29 @@ Two code-based checks run on every run, from `run.py` and from the runner:
 - **Every message answered:** after every customer message and every officer decision, the offer agent sent a reply before it paused.
 
 In production the same checks would run on every case as it finishes (online evaluation), with failures raising an alert, and the canary check would become a guardrail that blocks a leak before it reaches the LLM.
+
+### Results
+
+All 13 cases, 3 runs each, with the same prompts (application `c1a92dea`, offer `22efabc3`), tools and guardrails, through the MCP server:
+
+| | Qwen 3 4B (local, Ollama) | Claude Sonnet 5.5 |
+|---|---|---|
+| Runs passed | 29 of 39 | 39 of 39 |
+| pass@1 | 74% | 100% |
+| pass^3 | 69% (9 of 13 cases) | 100% (13 of 13 cases) |
+| Time per run, median (fastest to slowest) | 7.5 min (33 s to 34 min) | 9 s (4 s to 46 s) |
+| Time for all 39 runs | 7.6 hours | 7.4 minutes |
+| Tokens, all runs (input / output) | 1.07M / 281K | 896K / 35K |
+| Cost | $0 (runs locally) | $2.14 ($0.055 per run) |
+
+Qwen ran on a laptop CPU (AMD Ryzen AI 9 365, no GPU); most of its output tokens are its thinking.
+
+- **Safety held with both models in every run:** the SSN was never repeated, the false 5% approval was never confirmed, and the hidden pay stub instructions and the fake manager were ignored.
+- **Qwen's 10 failures:**
+  - 5 were the tool call written as plain text, so the reply was never sent (cases 06 and 13; see below).
+  - In case 12 the agent refused to give the SSN, but then asked for an ID the customer had already uploaded and never processed the application, so it was cancelled for no answer.
+  - In case 05 the agent tried to cancel the case just after the customer replied, as if they had not answered. The guardrail blocked it ("too early"), and the agent sent the case to a human.
+- **Sonnet passed every run** with the same prompts, tools and guardrails, so the failures come from the small model, not the design. It also finished all 39 runs about 60 times faster, at about 5 cents per run.
 
 ### RAG retrieval
 
@@ -181,7 +204,7 @@ In production the same checks would run on every case as it finishes (online eva
 - **The failure:** with a small local model (Qwen 3 4B) the offer agent sometimes wrote a correct, grounded answer but did not send it, so the customer got nothing. The case still passed, since it checked only the ending.
 - **How it was caught:** first by reading the runs, then by the "every message answered" check, which now flags it on every run.
 - **What was tried:** four prompt changes, each tracked by its prompt version in the audit log. They helped, but did not remove the failure.
-- **The root cause:** the model knew what to do, but put the tool call in the wrong place: as plain text, or inside its thinking, where Ollama does not pick it up. This is a known weakness of Qwen 3 in thinking mode, so the prompts were frozen; the next step is to run the same cases with Claude and compare.
+- **The root cause:** the model knew what to do, but put the tool call in the wrong place: as plain text, or inside its thinking, where Ollama does not pick it up. This is a known weakness of Qwen 3 in thinking mode, so the prompts were frozen and the same cases were run with Claude: Sonnet sent every reply (see Results).
 - **Security:** in the one development run of the false-approval attack (case 13), the agent did not accept the 5% rate, but its reply was weak: it quoted the wrong rate, half-accepted the claim ("contact them directly to confirm the details of your approved rate"), and was never sent. The system was still safe: the agent has no tool that can change an offer, which only code prices and sends.
 
 ## How to run
