@@ -186,3 +186,65 @@ def test_asking_for_the_pay_stub_in_other_words(direct, text, asked):
     answers = [ask(text, call_id="m1"), wait(), *MARIA[3:]]
     report, _ = runs(["02_maria_job_change"], answers)
     assert ("never asked for the pay stub" not in report.verdicts[0].problems) is asked
+
+
+# Tokens, cost and reliability.
+
+
+def verdict(case_id, run, passed, cost=0.1):
+    return runner.RunVerdict(case_id=case_id, kind="common", run=run, passed=passed, seconds=10.0 * run, cost_usd=cost)
+
+
+def test_pass_at_1_counts_runs_and_pass_k_counts_cases():
+    verdicts = [verdict("A", 1, True), verdict("A", 2, True), verdict("B", 1, True), verdict("B", 2, False)]
+    assert runner.pass_at_1(verdicts) == 0.75  # 3 of 4 runs passed
+    assert runner.pass_hat_k(verdicts) == 0.5  # only case A passed every run
+
+
+def test_a_correct_result_costs_the_failed_runs_too():
+    verdicts = [verdict("A", 1, True), verdict("A", 2, False), verdict("B", 1, True), verdict("B", 2, False)]
+    assert runner.total_cost(verdicts) == 0.4
+    assert runner.cost_per_passed_run(verdicts) == 0.2  # $0.40 for 2 passed runs
+
+
+def test_one_unknown_cost_makes_the_total_unknown():
+    verdicts = [verdict("A", 1, True), verdict("A", 2, True, cost=None)]
+    assert runner.total_cost(verdicts) is None
+    assert runner.cost_per_passed_run(verdicts) is None
+    assert runner.cost_per_passed_run([verdict("A", 1, False)]) is None  # nothing passed
+
+
+def with_usage(message, input_tokens=1_000, output_tokens=100):
+    usage = {"input_tokens": input_tokens, "output_tokens": output_tokens, "total_tokens": input_tokens + output_tokens}
+    return message.model_copy(update={"usage_metadata": usage})
+
+
+def test_a_run_records_its_calls_tokens_and_cost(direct, capsys):
+    model = FakeModel(messages=iter([with_usage(m) for m in OFFER_AGENT_ONLY]))
+    report, _ = run_all(["09_offer_late_fee_question"], 1, lambda: model, "anthropic:claude-sonnet-5-5", direct=True)
+    (run,) = report.verdicts
+    assert (run.llm_calls, run.input_tokens, run.output_tokens) == (3, 3_000, 300)
+    assert run.cost_usd == 0.009  # 3,000 tokens at $2 per million, 300 at $10 per million
+    assert report.cost_usd == report.cost_per_passed_run_usd == 0.009
+    assert "3 LLM calls, 3,000 + 300 tokens, cost $0.0090" in capsys.readouterr().out
+
+
+def test_a_crashed_run_has_an_unknown_cost(direct):
+    report, _ = runs(["09_offer_late_fee_question"], [step("retrieve_documents", {"query": "late fee"})])
+    (run,) = report.verdicts
+    assert not run.passed and run.cost_usd is None and run.llm_calls == 0
+
+
+def test_the_report_shows_reliability_time_tokens_and_cost():
+    verdicts = [verdict("A", 1, True), verdict("A", 2, True), verdict("A", 3, False)]
+    report = runner.Report(
+        started_at="2026-10-26T12:00:00Z", model="anthropic:claude-sonnet-5-5", prompt_version="p1",
+        offer_prompt_version="p2", through="direct", times=3, verdicts=verdicts,
+        pass_at_1=runner.pass_at_1(verdicts), pass_hat_k=runner.pass_hat_k(verdicts),
+        cost_usd=runner.total_cost(verdicts), cost_per_passed_run_usd=runner.cost_per_passed_run(verdicts),
+    )  # fmt: skip
+    text = format_report(report)
+    assert "A: passed 2 of 3  pass^3: no" in text
+    assert "time: median 20 s, slowest 30 s" in text
+    assert "pass@1: 67%  pass^3: 0% of cases" in text
+    assert "cost: $0.3000 in all, $0.1000 per run, $0.1500 per passed run" in text

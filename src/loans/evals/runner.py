@@ -23,14 +23,25 @@ tried something forbidden (agent level) but the code stopped it; a failed
 run means something forbidden got through or the case ended wrongly
 (system level).
 
+Each run also records its LLM calls, input and output tokens, and cost in
+USD (loans.evals.pricing; 0 for a local model, unknown for a model without a
+price). Per case the report shows the median and slowest run time, the
+average tokens and cost, and pass^k: whether all k runs passed, the strict
+measure of reliability. In total it shows pass@1 (the share of all runs that
+passed), pass^k (the share of cases whose every run passed), and the cost per
+run and per passed run: a failed run costs money too, so the cost of a
+correct result counts the failures as well.
+
 The report (each case's passes out of its runs, the problems of each failed
-run, and the model and prompt versions) is printed and saved as
-runs/runner/<run time>/report.json, apart from single runs of run.py.
+run, the figures above, and the model and prompt versions) is printed and
+saved as runs/runner/<run time>/report.json, apart from single runs of
+run.py.
 Each run's own files are in runs/runner/<run time>/<case>@<run time>-run<n>/.
 """
 
 import argparse
 import os
+import statistics
 import sys
 import time
 from collections.abc import Callable
@@ -46,6 +57,7 @@ from loans.agents.offer.prompt import PROMPT_VERSION as OFFER_PROMPT_VERSION
 from loans.audit import AgentVersion
 from loans.evals.case import CaseKind, EvalCase, load_case
 from loans.evals.checks import CheckResult
+from loans.evals.pricing import Usage, cost_usd, usage_of
 from loans.run import CASES, ROOT, load_keys, open_store, run_case
 from loans.store import StoredApplication
 
@@ -70,6 +82,11 @@ class RunVerdict(BaseModel):
     # Actions the code refused (action_blocked): the LLM tried, the code stopped it.
     blocked: int = 0
     seconds: float = 0
+    llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    # None if unknown: a model without a price, or a run that crashed.
+    cost_usd: float | None = None
 
 
 class Report(BaseModel):
@@ -80,6 +97,13 @@ class Report(BaseModel):
     through: str
     times: int
     verdicts: list[RunVerdict]
+    # The share of all runs that passed.
+    pass_at_1: float = 0
+    # The share of cases whose every run passed.
+    pass_hat_k: float = 0
+    # None if the cost of any run is unknown.
+    cost_usd: float | None = None
+    cost_per_passed_run_usd: float | None = None
 
 
 # Choosing the cases.
@@ -156,7 +180,45 @@ def blocked_actions(stored: StoredApplication) -> int:
     return sum(event.event == "action_blocked" for event in stored.audit_log)
 
 
+# The figures.
+
+
+def by_case(verdicts: list[RunVerdict]) -> dict[str, list[RunVerdict]]:
+    cases: dict[str, list[RunVerdict]] = {}
+    for verdict in verdicts:
+        cases.setdefault(verdict.case_id, []).append(verdict)
+    return cases
+
+
+def pass_at_1(verdicts: list[RunVerdict]) -> float:
+    """The share of all runs that passed."""
+    return sum(v.passed for v in verdicts) / len(verdicts) if verdicts else 0
+
+
+def pass_hat_k(verdicts: list[RunVerdict]) -> float:
+    """The share of cases whose every run passed."""
+    cases = by_case(verdicts)
+    return sum(all(v.passed for v in runs) for runs in cases.values()) / len(cases) if cases else 0
+
+
+def total_cost(verdicts: list[RunVerdict]) -> float | None:
+    """The cost of all runs, or None if the cost of any run is unknown."""
+    costs = [v.cost_usd for v in verdicts]
+    return None if None in costs else round(sum(costs), 6)
+
+
+def cost_per_passed_run(verdicts: list[RunVerdict]) -> float | None:
+    """The cost of all runs, failed ones included, divided by the runs that
+    passed: what one correct result costs. None if unknown or none passed."""
+    cost, passed = total_cost(verdicts), sum(v.passed for v in verdicts)
+    return None if cost is None or not passed else round(cost / passed, 6)
+
+
 # The report.
+
+
+def _usd(cost: float | None) -> str:
+    return "unknown" if cost is None else f"${cost:.4f}"
 
 
 def format_report(report: Report) -> str:
@@ -165,20 +227,34 @@ def format_report(report: Report) -> str:
         f"{report.offer_prompt_version} (offer)  tools: {report.through}",
         "",
     ]
-    by_case: dict[str, list[RunVerdict]] = {}
-    for verdict in report.verdicts:
-        by_case.setdefault(verdict.case_id, []).append(verdict)
-    for case_id, verdicts in by_case.items():
+    for case_id, verdicts in by_case(report.verdicts).items():
         passed = sum(v.passed for v in verdicts)
         line = f"{case_id}: passed {passed} of {len(verdicts)}"
+        if len(verdicts) > 1:
+            line += f"  pass^{len(verdicts)}: {'yes' if passed == len(verdicts) else 'no'}"
         if verdicts[0].kind == "attack":
             line += f"  (refused actions per run: {', '.join(str(v.blocked) for v in verdicts)})"
         lines.append(line)
+        seconds = [v.seconds for v in verdicts]
+        cost = total_cost(verdicts)
+        lines.append(
+            f"    time: median {statistics.median(seconds):.0f} s, slowest {max(seconds):.0f} s"
+            f"  tokens per run: {sum(v.input_tokens for v in verdicts) // len(verdicts):,} in, "
+            f"{sum(v.output_tokens for v in verdicts) // len(verdicts):,} out"
+            f"  cost per run: {_usd(None if cost is None else cost / len(verdicts))}"
+        )
         for v in verdicts:
             for problem in v.problems:
                 lines.append(f"    run {v.run}: {problem}")
     total = len(report.verdicts)
-    lines += ["", f"total: {sum(v.passed for v in report.verdicts)} of {total} runs passed"]
+    lines += [
+        "",
+        f"total: {sum(v.passed for v in report.verdicts)} of {total} runs passed",
+        f"pass@1: {report.pass_at_1:.0%}  pass^{report.times}: {report.pass_hat_k:.0%} of cases",
+        f"cost: {_usd(report.cost_usd)} in all, "
+        f"{_usd(None if report.cost_usd is None or not total else report.cost_usd / total)} per run, "
+        f"{_usd(report.cost_per_passed_run_usd)} per passed run",
+    ]
     return "\n".join(lines)
 
 
@@ -221,14 +297,25 @@ def run_all(
                 run = run_case(case, store, model, model_spec, application_id, run_dir / application_id, mcp_url, show)
                 problems = judge(case, run.stored, run.checks)
                 blocked = blocked_actions(run.stored)
+                usage = usage_of(run.result.messages + run.result.offer_messages)
+                cost = cost_usd(model_spec, usage)
             except Exception as e:  # recorded, and the runner goes on
                 problems, blocked = [f"error: {type(e).__name__}: {str(e) or 'no message'}"], 0
+                # What a crashed run used is lost with it.
+                usage, cost = Usage(), None
             verdict = RunVerdict(
                 case_id=case.case_id, kind=case.info.kind, run=n, passed=not problems,
                 problems=problems, blocked=blocked, seconds=round(time.monotonic() - began, 1),
+                llm_calls=usage.llm_calls, input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens, cost_usd=cost,
             )  # fmt: skip
             verdicts.append(verdict)
-            print(f"{case.case_id} run {n}/{times}: {'passed' if verdict.passed else 'FAILED'} ({verdict.seconds:.0f} s)", flush=True)
+            print(
+                f"{case.case_id} run {n}/{times}: {'passed' if verdict.passed else 'FAILED'} ({verdict.seconds:.0f} s, "
+                f"{verdict.llm_calls} LLM calls, {verdict.input_tokens:,} + {verdict.output_tokens:,} tokens, "
+                f"cost {_usd(verdict.cost_usd)})",
+                flush=True,
+            )
     report = Report(
         started_at=started,
         model=model_spec,
@@ -237,6 +324,10 @@ def run_all(
         through="direct" if direct else f"MCP server at {mcp_url}",
         times=times,
         verdicts=verdicts,
+        pass_at_1=pass_at_1(verdicts),
+        pass_hat_k=pass_hat_k(verdicts),
+        cost_usd=total_cost(verdicts),
+        cost_per_passed_run_usd=cost_per_passed_run(verdicts),
     )
     return report, run_dir
 
