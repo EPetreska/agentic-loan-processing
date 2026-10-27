@@ -191,14 +191,6 @@ Qwen ran on a laptop CPU (AMD Ryzen AI 9 365, no GPU); most of its output tokens
   - In case 05 the agent asked the customer for a document and, a minute later, tried to cancel for no answer. The guardrail blocked it ("too early"), and the agent sent the case to a human.
 - **Sonnet passed every run** with the same prompts, tools and guardrails, which points to the small model rather than the design. It also finished all 39 runs about 60 times faster, at about 5 cents per run.
 
-### RAG retrieval
-
-24 hand-written customer questions (16 about this loan, 8 general), some with traps where a page about another product competes with the bank's own terms:
-
-| Hit rate @4 | MRR | Bank's document first (questions about this loan) |
-|---|---|---|
-| 88% | 0.76 | 88% |
-
 ### What the evals caught
 
 - **The failure:** with a small local model (Qwen 3 4B) the offer agent sometimes wrote a correct, grounded answer but did not send it, so the customer got nothing. The case still passed, since it checked only the ending.
@@ -206,6 +198,14 @@ Qwen ran on a laptop CPU (AMD Ryzen AI 9 365, no GPU); most of its output tokens
 - **What was tried:** four prompt changes, each tracked by its prompt version in the audit log. They helped, but did not remove the failure.
 - **The root cause:** the model knew what to do, but put the tool call in the wrong place: as plain text, or inside its thinking, where Ollama does not pick it up. This is a known weakness of Qwen 3 in thinking mode, so the prompts were frozen and the same cases were run with Claude: Sonnet sent every reply (see Results).
 - **Security:** in the false-approval attack (case 13), Qwen never confirmed the 5% rate, but most of its (unsent) drafts half-accepted the claim, for example "has not yet been processed into a new offer". Sonnet said every time that it could not confirm the rate and passed the request to a loan officer. The system was safe either way: the agent has no tool that can change an offer, which only code prices and sends.
+
+### RAG retrieval
+
+24 hand-written customer questions (16 about this loan, 8 general), some with traps where a page about another product competes with the bank's own terms:
+
+| Hit rate @4 | MRR | Bank's document first (questions about this loan) |
+|---|---|---|
+| 88% | 0.76 | 88% |
 
 ## How to run
 
